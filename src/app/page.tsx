@@ -1,65 +1,132 @@
-import Image from "next/image";
+"use client";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
+  const router = useRouter();
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main style={{
+      minHeight: "100dvh",
+      width: "100%",
+      position: "relative",
+      fontFamily: "system-ui, -apple-system, sans-serif",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "flex-end",
+      padding: "0 24px 52px",
+      maxWidth: 430,
+      margin: "0 auto",
+      overflow: "hidden",
+    }}>
+
+      {/* Background image */}
+      <div style={{
+        position: "absolute",
+        inset: 0,
+        backgroundImage: "url('/ijebu-bg.jpg')",
+        backgroundSize: "cover",
+        backgroundPosition: "center top",
+        zIndex: 0,
+      }} />
+
+      {/* Overlay */}
+      <div style={{
+        position: "absolute",
+        inset: 0,
+        background: "linear-gradient(to bottom, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.2) 40%, rgba(0,0,0,0.82) 70%, rgba(0,0,0,0.95) 100%)",
+        zIndex: 1,
+      }} />
+
+      {/* Top logo */}
+      <div style={{
+        position: "absolute",
+        top: 52, left: 0, right: 0,
+        display: "flex", justifyContent: "center",
+        zIndex: 2,
+      }}>
+        <div style={{
+          background: "rgba(255,255,255,0.12)",
+          backdropFilter: "blur(12px)",
+          border: "1px solid rgba(255,255,255,0.25)",
+          borderRadius: 50, padding: "8px 20px",
+        }}>
+          <span style={{ fontSize: 18, fontWeight: 900, color: "#fff", letterSpacing: "-0.02em" }}>
+            ìjèbú<span style={{ color: "#D4AF37" }}>soul</span>
+          </span>
+        </div>
+      </div>
+
+      {/* Bottom content */}
+      <div style={{ position: "relative", zIndex: 2, width: "100%", maxWidth: 380 }}>
+        <h1 style={{
+          fontSize: 38, fontWeight: 900, color: "#fff",
+          letterSpacing: "-0.03em", lineHeight: 1.1,
+          marginBottom: 10, textAlign: "left",
+        }}>
+          Find love rooted<br />
+          in <span style={{ color: "#D4AF37" }}>Ìjèbú culture</span>
+        </h1>
+
+        <p style={{
+          fontSize: 15, color: "rgba(255,255,255,0.7)",
+          lineHeight: 1.6, marginBottom: 32,
+          textAlign: "left", fontWeight: 400,
+        }}>
+          Connect with real people who share your heritage, your language, and your values.
+        </p>
+
+        {/* Social proof */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 28 }}>
+          <div style={{ display: "flex" }}>
+            {["👩🏾", "👨🏿", "👩🏿", "🧑🏾"].map((em, i) => (
+              <div key={i} style={{
+                width: 34, height: 34, borderRadius: "50%",
+                border: "2px solid #fff",
+                background: ["#FFDEE9","#D0E8FF","#D1FAE5","#FEF3C7"][i],
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 16, marginLeft: i === 0 ? 0 : -10,
+                position: "relative", zIndex: 4 - i,
+              }}>{em}</div>
+            ))}
+          </div>
+          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", fontWeight: 500 }}>
+            2,400+ locals already matched
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+
+        {/* Buttons — now wired */}
+        <button
+          onClick={() => router.push("/onboarding")}
+          style={{
+            width: "100%", background: "#D4AF37",
+            color: "#000", fontSize: 16, fontWeight: 800,
+            border: "none", padding: "18px 0",
+            borderRadius: 14, cursor: "pointer",
+            marginBottom: 12, letterSpacing: "-0.01em",
+          }}>
+          Create my profile ✨
+        </button>
+
+        <button
+          onClick={() => router.push("/login")}
+          style={{
+            width: "100%", background: "rgba(255,255,255,0.12)",
+            color: "#fff", fontSize: 16, fontWeight: 600,
+            border: "1.5px solid rgba(255,255,255,0.35)",
+            padding: "17px 0", borderRadius: 14,
+            cursor: "pointer", marginBottom: 24,
+          }}>
+          Log in
+        </button>
+
+        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", lineHeight: 1.7, textAlign: "center" }}>
+          By continuing you agree to our{" "}
+          <span style={{ textDecoration: "underline", color: "rgba(255,255,255,0.6)" }}>Terms</span>
+          {" "}and{" "}
+          <span style={{ textDecoration: "underline", color: "rgba(255,255,255,0.6)" }}>Privacy Policy</span>
+        </p>
+      </div>
+    </main>
   );
 }
