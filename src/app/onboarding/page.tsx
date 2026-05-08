@@ -66,41 +66,48 @@ interface NextBtnProps {
 }
 
 const NextBtn = ({ onClick, label = "Continue →", disabled = false, loading = false }: NextBtnProps) => (
-  <button onClick={onClick} disabled={disabled || loading} style={{ width: "100%", background: disabled || loading ? "rgba(212,175,55,0.3)" : "#D4AF37", color: disabled || loading ? "rgba(0,0,0,0.35)" : "#000", fontSize: 16, fontWeight: 800, border: "none", padding: "18px 0", borderRadius: 14, cursor: disabled || loading ? "not-allowed" : "pointer", marginTop: 24 }}>
+  <button
+    onClick={onClick}
+    disabled={disabled || loading}
+    style={{
+      width: "100%",
+      background: disabled || loading ? "rgba(212,175,55,0.3)" : "#D4AF37",
+      color: disabled || loading ? "rgba(0,0,0,0.35)" : "#000",
+      fontSize: 16,
+      fontWeight: 800,
+      border: "none",
+      padding: "18px 0",
+      borderRadius: 14,
+      cursor: disabled || loading ? "not-allowed" : "pointer",
+      marginTop: 24,
+    }}
+  >
     {loading ? "Please wait..." : label}
   </button>
 );
-
-// ─── Total steps now includes the OTP verification step (step 1) ─────────────
-// step 0: email/password
-// step 1: OTP verification  ← NEW
-// step 2: name + age
-// step 3: gender + preference
-// step 4: location
-// step 5: looking for
-// step 6: photos
-// step 7: bio  ← last, inserts profile
 
 export default function OnboardingPage() {
   const router  = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [step, setStep]       = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState("");
-  const [userId, setUserId]   = useState<string | null>(null);
-  const [photos, setPhotos]   = useState<{ file: File; preview: string }[]>([]);
-  const [otp, setOtp]         = useState("");
-  const [form, setForm]       = useState({
+  const [step, setStep]                     = useState(0);
+  const [loading, setLoading]               = useState(false);
+  const [error, setError]                   = useState("");
+  const [userId, setUserId]                 = useState<string | null>(null);
+  const [photos, setPhotos]                 = useState<{ file: File; preview: string }[]>([]);
+  const [otp, setOtp]                       = useState("");
+  const [resendSent, setResendSent]         = useState(false);
+  const [resendLoading, setResendLoading]   = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [form, setForm] = useState({
     email: "", password: "", name: "", age: "", gender: "",
     preference: "", location: "", lookingFor: "", bio: "",
   });
 
-  // Step 0 = account creation, step 1 = OTP, steps 2–7 = profile info
-  const TOTAL_DISPLAY_STEPS = 7; // shown in UI as "Step X of 7" (OTP step doesn't count)
-  const displayStep = step === 0 ? 1 : step >= 2 ? step : 1; // OTP is still "Step 1"
   const progress = (step / 8) * 100;
-  const update = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+  const update   = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
   const errorBox = error ? (
     <div style={{ background: "rgba(255,51,102,0.15)", border: "1px solid rgba(255,51,102,0.4)", borderRadius: 12, padding: "12px 16px", fontSize: 13, color: "#FF3366", marginBottom: 20, wordBreak: "break-word" }}>
@@ -108,7 +115,19 @@ export default function OnboardingPage() {
     </div>
   ) : null;
 
-  // ── Photo handling ──────────────────────────────────────────────────────────
+  // ── 60-second resend cooldown ─────────────────────────────────────────────────
+  const startCooldown = () => {
+    setResendCooldown(60);
+    if (cooldownRef.current) clearInterval(cooldownRef.current);
+    cooldownRef.current = setInterval(() => {
+      setResendCooldown(prev => {
+        if (prev <= 1) { clearInterval(cooldownRef.current!); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // ── Photo handling ────────────────────────────────────────────────────────────
   const handlePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     files.forEach(file => {
@@ -133,7 +152,7 @@ export default function OnboardingPage() {
     return urls;
   };
 
-  // ── canNext ─────────────────────────────────────────────────────────────────
+  // ── canNext ───────────────────────────────────────────────────────────────────
   const canNext = () => {
     if (step === 0) return form.email.includes("@") && form.password.length >= 6;
     if (step === 1) return otp.trim().length === 6;
@@ -146,33 +165,48 @@ export default function OnboardingPage() {
     return true;
   };
 
-  // ── Main next handler ────────────────────────────────────────────────────────
+  // ── Resend OTP ────────────────────────────────────────────────────────────────
+  const handleResend = async () => {
+    if (resendCooldown > 0 || resendLoading) return;
+    setError("");
+    setResendSent(false);
+    setResendLoading(true);
+    const { error: resendErr } = await supabase.auth.resend({
+      type: "signup",
+      email: form.email,
+    });
+    setResendLoading(false);
+    if (resendErr) {
+      setError(resendErr.message);
+    } else {
+      setResendSent(true);
+      startCooldown();
+    }
+  };
+
+  // ── Main next handler ─────────────────────────────────────────────────────────
   const next = async () => {
     setError("");
 
-    // ── Step 0: Sign up — Supabase sends OTP code to email ───────────────────
+    // Step 0: Sign up
     if (step === 0) {
       setLoading(true);
       const { data, error: signUpErr } = await supabase.auth.signUp({
         email: form.email,
         password: form.password,
-        options: {
-          // This tells Supabase to send a 6-digit OTP instead of a magic link.
-          // Make sure "Email OTP" is enabled in Supabase Dashboard →
-          // Authentication → Settings → Email Auth → "Use OTP for email confirmation"
-          data: { onboarding: true },
-        },
+        options: { data: { onboarding: true } },
       });
       setLoading(false);
       if (signUpErr) { setError(signUpErr.message); return; }
       const uid = data.user?.id ?? null;
       if (!uid) { setError("Signup failed — no user returned."); return; }
       setUserId(uid);
-      setStep(1); // go to OTP step
+      startCooldown();
+      setStep(1);
       return;
     }
 
-    // ── Step 1: Verify OTP ────────────────────────────────────────────────────
+    // Step 1: Verify OTP
     if (step === 1) {
       setLoading(true);
       const { error: verifyErr } = await supabase.auth.verifyOtp({
@@ -181,19 +215,19 @@ export default function OnboardingPage() {
         type: "signup",
       });
       setLoading(false);
-      if (verifyErr) { setError(verifyErr.message); return; }
-      // OTP verified — session is now active. Move to profile steps.
+      if (verifyErr) {
+        setError("Invalid or expired code. Please try again or request a new one.");
+        return;
+      }
       setStep(2);
       return;
     }
 
-    // ── Step 7 (last): Upload photos + insert profile ─────────────────────────
+    // Step 7: Upload photos + insert profile
     if (step === 7) {
       setLoading(true);
-
       const { data: sessionData } = await supabase.auth.getSession();
       const uid = userId ?? sessionData?.session?.user?.id ?? null;
-
       if (!uid) {
         setError("Session expired. Please go back to step 1 and start again.");
         setLoading(false);
@@ -238,7 +272,7 @@ export default function OnboardingPage() {
 
   const back = () => (step > 0 ? setStep(s => s - 1) : router.back());
 
-  // ── Step 0: Account ──────────────────────────────────────────────────────────
+  // ── Step 0: Account ───────────────────────────────────────────────────────────
   if (step === 0) return (
     <Shell progress={progress} onBack={back}>
       <p style={{ fontSize: 12, fontWeight: 700, color: "#D4AF37", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>Step 1 of 7</p>
@@ -259,24 +293,29 @@ export default function OnboardingPage() {
     </Shell>
   );
 
-  // ── Step 1: OTP Verification ─────────────────────────────────────────────────
+  // ── Step 1: OTP Verification ──────────────────────────────────────────────────
   if (step === 1) return (
     <Shell progress={progress} onBack={back}>
       <p style={{ fontSize: 12, fontWeight: 700, color: "#D4AF37", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>Step 1 of 7</p>
 
-      {/* Welcome message */}
+      {/* Welcome banner */}
       <div style={{ background: "rgba(212,175,55,0.12)", border: "1px solid rgba(212,175,55,0.3)", borderRadius: 16, padding: "16px 18px", marginBottom: 28, display: "flex", alignItems: "flex-start", gap: 12 }}>
         <span style={{ fontSize: 24, flexShrink: 0 }}>🎉</span>
         <div>
           <div style={{ fontSize: 15, fontWeight: 800, color: "#D4AF37", marginBottom: 4 }}>Welcome to ìjèbúsoul!</div>
           <div style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>
-            Your account has been created. We've sent a 6-digit confirmation code to <strong style={{ color: "#fff" }}>{form.email}</strong>. Enter it below to continue.
+            Your account has been created. We've sent a 6-digit confirmation code to{" "}
+            <strong style={{ color: "#fff" }}>{form.email}</strong>.
           </div>
         </div>
       </div>
 
       <h1 style={{ fontSize: 34, fontWeight: 900, color: "#fff", letterSpacing: "-0.03em", lineHeight: 1.1, marginBottom: 8 }}>Check your email</h1>
-      <p style={{ fontSize: 15, color: "rgba(255,255,255,0.55)", marginBottom: 28 }}>Enter the 6-digit code we just sent you.</p>
+      <p style={{ fontSize: 15, color: "rgba(255,255,255,0.55)", marginBottom: 28 }}>
+        Enter the 6-digit code we sent you. Check your{" "}
+        <strong style={{ color: "#fff" }}>spam/junk</strong> folder if you don't see it.
+      </p>
+
       {errorBox}
 
       <div>
@@ -288,7 +327,7 @@ export default function OnboardingPage() {
           placeholder="123456"
           maxLength={6}
           value={otp}
-          onChange={e => setOtp(e.target.value.replace(/\D/g, ""))}
+          onChange={e => { setOtp(e.target.value.replace(/\D/g, "")); setError(""); }}
           style={{ ...inputStyle, fontSize: 28, fontWeight: 800, letterSpacing: "0.25em", textAlign: "center" }}
           autoFocus
         />
@@ -296,27 +335,56 @@ export default function OnboardingPage() {
 
       <NextBtn onClick={next} disabled={!canNext()} loading={loading} label="Verify & continue →" />
 
-      {/* Resend option */}
-      <button
-        onClick={async () => {
-          setError("");
-          setLoading(true);
-          const { error: resendErr } = await supabase.auth.resend({
-            type: "signup",
-            email: form.email,
-          });
-          setLoading(false);
-          if (resendErr) setError(resendErr.message);
-          else setError(""); // could show a success toast here
-        }}
-        style={{ width: "100%", background: "transparent", border: "none", color: "rgba(255,255,255,0.4)", fontSize: 13, marginTop: 16, cursor: "pointer", textDecoration: "underline" }}
-      >
-        Didn't get it? Resend code
-      </button>
+      {/* ── Resend section ──────────────────────────────────────────────────── */}
+      <div style={{ marginTop: 20, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 20 }}>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", textAlign: "center", marginBottom: 12 }}>
+          Didn't receive a code?
+        </p>
+
+        <button
+          onClick={handleResend}
+          disabled={resendCooldown > 0 || resendLoading}
+          style={{
+            width: "100%",
+            background: resendCooldown > 0 ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.1)",
+            border: `1.5px solid ${resendCooldown > 0 ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.25)"}`,
+            borderRadius: 14,
+            color: resendCooldown > 0 ? "rgba(255,255,255,0.3)" : "#fff",
+            fontSize: 15,
+            fontWeight: 700,
+            padding: "16px 0",
+            cursor: resendCooldown > 0 ? "not-allowed" : "pointer",
+            transition: "all 0.2s ease",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+          }}
+        >
+          {resendLoading
+            ? "Sending..."
+            : resendCooldown > 0
+            ? `📨 Resend in ${resendCooldown}s`
+            : "📨 Send me a new code"}
+        </button>
+
+        {/* Success confirmation */}
+        {resendSent && resendCooldown > 0 && (
+          <div style={{ background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 12, padding: "12px 16px", marginTop: 12, display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 18 }}>✅</span>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#4ade80", marginBottom: 2 }}>New code sent!</div>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)" }}>
+                Check your inbox and <strong style={{ color: "rgba(255,255,255,0.7)" }}>spam/junk</strong> folder.
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </Shell>
   );
 
-  // ── Step 2: Name + Age ───────────────────────────────────────────────────────
+  // ── Step 2: Name + Age ────────────────────────────────────────────────────────
   if (step === 2) return (
     <Shell progress={progress} onBack={back}>
       <p style={{ fontSize: 12, fontWeight: 700, color: "#D4AF37", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>Step 2 of 7</p>
@@ -336,7 +404,7 @@ export default function OnboardingPage() {
     </Shell>
   );
 
-  // ── Step 3: Gender + Preference ──────────────────────────────────────────────
+  // ── Step 3: Gender + Preference ───────────────────────────────────────────────
   if (step === 3) return (
     <Shell progress={progress} onBack={back}>
       <p style={{ fontSize: 12, fontWeight: 700, color: "#D4AF37", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>Step 3 of 7</p>
@@ -362,7 +430,7 @@ export default function OnboardingPage() {
     </Shell>
   );
 
-  // ── Step 4: Location ─────────────────────────────────────────────────────────
+  // ── Step 4: Location ──────────────────────────────────────────────────────────
   if (step === 4) return (
     <Shell progress={progress} onBack={back}>
       <p style={{ fontSize: 12, fontWeight: 700, color: "#D4AF37", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>Step 4 of 7</p>
@@ -383,7 +451,7 @@ export default function OnboardingPage() {
     </Shell>
   );
 
-  // ── Step 5: Looking for ──────────────────────────────────────────────────────
+  // ── Step 5: Looking for ───────────────────────────────────────────────────────
   if (step === 5) return (
     <Shell progress={progress} onBack={back}>
       <p style={{ fontSize: 12, fontWeight: 700, color: "#D4AF37", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>Step 5 of 7</p>
@@ -405,7 +473,7 @@ export default function OnboardingPage() {
     </Shell>
   );
 
-  // ── Step 6: Photos ───────────────────────────────────────────────────────────
+  // ── Step 6: Photos ────────────────────────────────────────────────────────────
   if (step === 6) return (
     <Shell progress={progress} onBack={back}>
       <p style={{ fontSize: 12, fontWeight: 700, color: "#D4AF37", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>Step 6 of 7</p>
@@ -418,7 +486,6 @@ export default function OnboardingPage() {
             {photos[i] ? (
               <>
                 <img src={photos[i].preview} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
-                {/* Remove button */}
                 <button
                   onClick={e => { e.stopPropagation(); setPhotos(p => p.filter((_, idx) => idx !== i)); }}
                   style={{ position: "absolute", top: 6, right: 6, background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%", width: 24, height: 24, color: "#fff", fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}
@@ -427,7 +494,9 @@ export default function OnboardingPage() {
             ) : (
               <span style={{ fontSize: i === 0 ? 28 : 22, color: "rgba(255,255,255,0.4)" }}>{i === 0 ? "📸" : "+"}</span>
             )}
-            {i === 0 && !photos[0] && <div style={{ position: "absolute", bottom: 8, left: 0, right: 0, textAlign: "center", fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>Main photo</div>}
+            {i === 0 && !photos[0] && (
+              <div style={{ position: "absolute", bottom: 8, left: 0, right: 0, textAlign: "center", fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>Main photo</div>
+            )}
           </div>
         ))}
       </div>
@@ -436,14 +505,21 @@ export default function OnboardingPage() {
     </Shell>
   );
 
-  // ── Step 7: Bio ──────────────────────────────────────────────────────────────
+  // ── Step 7: Bio ───────────────────────────────────────────────────────────────
   return (
     <Shell progress={progress} onBack={back}>
       <p style={{ fontSize: 12, fontWeight: 700, color: "#D4AF37", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>Step 7 of 7</p>
       <h1 style={{ fontSize: 34, fontWeight: 900, color: "#fff", letterSpacing: "-0.03em", lineHeight: 1.1, marginBottom: 8 }}>Tell your story</h1>
       <p style={{ fontSize: 15, color: "rgba(255,255,255,0.55)", marginBottom: 28 }}>What makes you, you? Keep it real.</p>
       {errorBox}
-      <textarea placeholder="e.g. Ijebu girl who loves suya nights and deep convos..." value={form.bio} onChange={e => update("bio", e.target.value)} maxLength={300} rows={6} style={{ ...inputStyle, resize: "none", lineHeight: 1.6, paddingTop: 16 }} />
+      <textarea
+        placeholder="e.g. Ijebu girl who loves suya nights and deep convos..."
+        value={form.bio}
+        onChange={e => update("bio", e.target.value)}
+        maxLength={300}
+        rows={6}
+        style={{ ...inputStyle, resize: "none", lineHeight: 1.6, paddingTop: 16 }}
+      />
       <div style={{ textAlign: "right", marginTop: 8, fontSize: 12, color: "rgba(255,255,255,0.35)" }}>{form.bio.length}/300</div>
       <NextBtn onClick={next} disabled={!canNext()} loading={loading} label="Finish & find my matches 🎉" />
     </Shell>
