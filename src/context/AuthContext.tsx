@@ -50,11 +50,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  return (
-    <AuthContext.Provider value={{ user, profile, loading, signOut: () => supabase.auth.signOut(), refreshProfile }}>
-      {children}
-    </AuthContext.Provider>
-  );
+return (
+  <AuthContext.Provider value={{ user, profile, loading, signOut: async () => { await supabase.auth.signOut(); }, refreshProfile }}>
+    {children}
+  </AuthContext.Provider>
+);
 }
 
 export const useAuth = () => useContext(AuthContext);
