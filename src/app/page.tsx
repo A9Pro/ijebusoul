@@ -8,7 +8,7 @@ export default function Home() {
     <main style={{
       minHeight: "100dvh",
       width: "100%",
-      position: "relative",
+      position: "relative",           // ← required for absolute children
       fontFamily: "system-ui, -apple-system, sans-serif",
       display: "flex",
       flexDirection: "column",
@@ -20,17 +20,18 @@ export default function Home() {
       overflow: "hidden",
     }}>
 
-      {/* Background image */}
+      {/* Background image — fallback color shown if image is missing */}
       <div style={{
         position: "absolute",
         inset: 0,
         backgroundImage: "url('/ijebu-bg.jpg')",
         backgroundSize: "cover",
         backgroundPosition: "center top",
+        backgroundColor: "#1a0a00",   // ← warm dark fallback
         zIndex: 0,
       }} />
 
-      {/* Overlay */}
+      {/* Overlay gradient */}
       <div style={{
         position: "absolute",
         inset: 0,
@@ -83,7 +84,7 @@ export default function Home() {
               <div key={i} style={{
                 width: 34, height: 34, borderRadius: "50%",
                 border: "2px solid #fff",
-                background: ["#FFDEE9","#D0E8FF","#D1FAE5","#FEF3C7"][i],
+                background: ["#FFDEE9", "#D0E8FF", "#D1FAE5", "#FEF3C7"][i],
                 display: "flex", alignItems: "center", justifyContent: "center",
                 fontSize: 16, marginLeft: i === 0 ? 0 : -10,
                 position: "relative", zIndex: 4 - i,
@@ -95,7 +96,7 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Buttons — now wired */}
+        {/* CTA Buttons */}
         <button
           onClick={() => router.push("/onboarding")}
           style={{
