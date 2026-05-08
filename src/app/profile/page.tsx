@@ -1,5 +1,6 @@
 "use client";
 import { useState, useRef } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, avatarUrl, uploadAvatar } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
@@ -56,9 +57,9 @@ export default function ProfilePage() {
     router.replace("/");
   };
 
-  useEffect: useEffect(() => {
-    if (!authLoading && !user) router.replace("/");
-  }, [authLoading, user]);
+  useEffect(() => {
+  if (!authLoading && !user) router.replace("/");
+}, [authLoading, user]);
 
   if (authLoading || !profile) return (
     <div style={{ minHeight: "100dvh", background: "#0a0a0a", display: "flex", alignItems: "center", justifyContent: "center" }}>

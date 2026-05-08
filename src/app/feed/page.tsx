@@ -23,7 +23,6 @@ export default function FeedPage() {
     if (!user) return;
     (async () => {
       setFetching(true);
-
       const { data: rawPosts } = await supabase
         .from("posts")
         .select("*, profile:profiles(*)")
@@ -33,7 +32,6 @@ export default function FeedPage() {
       if (!rawPosts?.length) { setPosts([]); setFetching(false); return; }
 
       const postIds = rawPosts.map(p => p.id);
-
       const { data: myLikes } = await supabase
         .from("post_likes").select("post_id").eq("user_id", user.id).in("post_id", postIds);
       const likedSet = new Set(myLikes?.map(l => l.post_id) ?? []);
@@ -116,7 +114,7 @@ export default function FeedPage() {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px 10px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#1a1a1a", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 22 }}>🙂</span>}
+                    {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : <span style={{ fontSize: 22 }}>🙂</span>}
                   </div>
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 800, color: "#fff" }}>{post.profile?.name}</div>
@@ -136,11 +134,10 @@ export default function FeedPage() {
                 </div>
               ) : media ? (
                 <div style={{ margin: "0 16px 12px", borderRadius: 18, overflow: "hidden", height: 280, background: "#111" }}>
-                  {post.type === "video" ? (
-                    <video src={media} style={{ width: "100%", height: "100%", objectFit: "cover" }} controls />
-                  ) : (
-                    <img src={media} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  )}
+                  {post.type === "video"
+                    ? <video src={media} style={{ width: "100%", height: "100%", objectFit: "cover" }} controls />
+                    : <img src={media} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+                  }
                 </div>
               ) : (
                 <div style={{ margin: "0 16px 12px", borderRadius: 18, background: "#1a1a1a", height: 200, display: "flex", alignItems: "center", justifyContent: "center" }}>

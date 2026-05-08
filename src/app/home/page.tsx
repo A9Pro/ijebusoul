@@ -33,7 +33,6 @@ export default function HomePage() {
     if (!user) return;
     (async () => {
       setFetching(true);
-      // Get already-swiped IDs
       const { data: swipes } = await supabase
         .from("swipes").select("swiped_id").eq("swiper_id", user.id);
       const swipedIds = swipes?.map(s => s.swiped_id) ?? [];
@@ -80,7 +79,7 @@ export default function HomePage() {
         <div style={{ fontSize: 64 }}>👀</div>
         <h2 style={{ fontSize: 22, fontWeight: 900, textAlign: "center", letterSpacing: "-0.02em" }}>You've seen everyone nearby</h2>
         <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", textAlign: "center" }}>Check back soon — new people join daily.</p>
-        <button onClick={() => { setIndex(0); }} style={{ background: "#D4AF37", border: "none", borderRadius: 50, padding: "12px 28px", fontSize: 14, fontWeight: 700, color: "#000", cursor: "pointer", marginTop: 8 }}>Refresh</button>
+        <button onClick={() => setIndex(0)} style={{ background: "#D4AF37", border: "none", borderRadius: 50, padding: "12px 28px", fontSize: 14, fontWeight: 700, color: "#000", cursor: "pointer", marginTop: 8 }}>Refresh</button>
       </div>
       <BottomNav />
     </main>
@@ -110,7 +109,7 @@ export default function HomePage() {
           {photoSrc ? (
             <img src={photoSrc} alt={current.name} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
           ) : (
-            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 120, background: "#1a1a1a" }}>🙂</div>
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 120 }}>🙂</div>
           )}
 
           {toast && (
