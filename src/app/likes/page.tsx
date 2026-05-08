@@ -1,44 +1,112 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { supabase, avatarUrl } from "@/lib/supabase";
+import { useAuth } from "@/context/AuthContext";
 import BottomNav from "@/components/BottomNav";
+import type { Profile } from "@/lib/types";
 
-const LIKED_YOU = [
-  { id: 1, name: "Segun",  age: 30, location: "Sagamu",    distance: "8km",  bio: "Engineer by day, chef by night 🍳 Fluent in Ijebu proverbs and bad jokes.", bg: "#D0E8FF", emoji: "👨🏿", lookingFor: "Casual",       time: "2m ago"     },
-  { id: 2, name: "Femi",   age: 28, location: "Ago-Iwoye", distance: "22km", bio: "No pressure, good vibes only ✌🏾 Ijebu blood runs deep.",                   bg: "#FEF3C7", emoji: "🧑🏾", lookingFor: "FWB",          time: "1h ago"     },
-  { id: 3, name: "Dare",   age: 32, location: "Ijebu Ode", distance: "4km",  bio: "History nerd meets music lover. Let's talk culture over suya 🔥",            bg: "#FFE4CC", emoji: "👨🏾", lookingFor: "Relationship", time: "3h ago"     },
-  { id: 4, name: "Bode",   age: 27, location: "Ijebu Igbo",distance: "14km", bio: "Sunday jollof or weekday amala? Both. Always both. 😂",                      bg: "#D1FAE5", emoji: "👨🏾", lookingFor: "Friendship",   time: "Yesterday"  },
-  { id: 5, name: "Kolade", age: 29, location: "Odogbolu",  distance: "31km", bio: "Architect, foodie, weekend footballer. Ijebu pride ⚽",                       bg: "#EDE9FF", emoji: "👨🏿", lookingFor: "Relationship", time: "2 days ago" },
-];
-
-const BADGE_COLORS: Record<string, { bg: string; color: string }> = {
-  Relationship: { bg: "rgba(255,51,102,0.2)", color: "#FF3366" },
-  Casual:       { bg: "rgba(59,130,246,0.2)", color: "#60A5FA" },
-  Friendship:   { bg: "rgba(212,175,55,0.2)", color: "#D4AF37" },
-  FWB:          { bg: "rgba(16,185,129,0.2)", color: "#34D399" },
+const BADGE: Record<string, { bg: string; color: string }> = {
+  relationship: { bg: "rgba(255,51,102,0.2)", color: "#FF3366" },
+  casual:       { bg: "rgba(59,130,246,0.2)", color: "#60A5FA" },
+  friendship:   { bg: "rgba(212,175,55,0.2)", color: "#D4AF37" },
+  fwb:          { bg: "rgba(16,185,129,0.2)", color: "#34D399" },
 };
 
-type LikeEntry = typeof LIKED_YOU[number] & { matched: boolean; passed: boolean };
+type LikeEntry = { profile: Profile; action: string; created_at: string; matched: boolean; passed: boolean };
 
 export default function LikesPage() {
   const router = useRouter();
-  const [likes, setLikes]   = useState<LikeEntry[]>(LIKED_YOU.map((p) => ({ ...p, matched: false, passed: false })));
-  const [toast, setToast]   = useState<{ msg: string; color: string } | null>(null);
+  const { user, loading: authLoading } = useAuth();
+
+  const [likes, setLikes]   = useState<LikeEntry[]>([]);
+  const [fetching, setFetching] = useState(true);
   const [filter, setFilter] = useState<"all" | "new" | "matched">("all");
+  const [toast, setToast]   = useState<{ msg: string; color: string } | null>(null);
 
-  const showToast   = (msg: string, color: string) => { setToast({ msg, color }); setTimeout(() => setToast(null), 1400); };
-  const handleMatch = (id: number) => { setLikes((l) => l.map((p) => p.id === id ? { ...p, matched: true } : p)); showToast("It's a match! 🎉", "#D4AF37"); };
-  const handlePass  = (id: number) =>   setLikes((l) => l.map((p) => p.id === id ? { ...p, passed: true }  : p));
+  useEffect(() => {
+    if (!authLoading && !user) router.replace("/");
+  }, [authLoading, user]);
 
-  const visible  = likes.filter((p) => filter === "new" ? !p.matched && !p.passed : filter === "matched" ? p.matched : !p.passed);
-  const newCount = likes.filter((p) => !p.matched && !p.passed).length;
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      setFetching(true);
+      // People who liked me
+      const { data: rawLikes } = await supabase
+        .from("swipes")
+        .select("swiper_id, action, created_at")
+        .eq("swiped_id", user.id)
+        .in("action", ["like", "superlike"])
+        .order("created_at", { ascending: false });
+
+      if (!rawLikes?.length) { setLikes([]); setFetching(false); return; }
+
+      // Get their profiles
+      const ids = rawLikes.map(l => l.swiper_id);
+      const { data: profiles } = await supabase.from("profiles").select("*").in("id", ids);
+      const profileMap: Record<string, Profile> = {};
+      profiles?.forEach(p => { profileMap[p.id] = p as Profile; });
+
+      // Check which ones I've already matched with
+      const { data: myMatches } = await supabase
+        .from("matches")
+        .select("user1_id, user2_id")
+        .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`);
+      const matchedIds = new Set<string>();
+      myMatches?.forEach(m => {
+        matchedIds.add(m.user1_id === user.id ? m.user2_id : m.user1_id);
+      });
+
+      setLikes(rawLikes.map(l => ({
+        profile: profileMap[l.swiper_id],
+        action: l.action,
+        created_at: l.created_at,
+        matched: matchedIds.has(l.swiper_id),
+        passed: false,
+      })).filter(l => l.profile));
+
+      setFetching(false);
+    })();
+  }, [user]);
+
+  const showToast = (msg: string, color: string) => { setToast({ msg, color }); setTimeout(() => setToast(null), 1400); };
+
+  const handleLikeBack = async (entry: LikeEntry) => {
+    if (!user) return;
+    await supabase.from("swipes").insert({ swiper_id: user.id, swiped_id: entry.profile.id, action: "like" });
+    setLikes(l => l.map(e => e.profile.id === entry.profile.id ? { ...e, matched: true } : e));
+    showToast("It's a match! 🎉", "#D4AF37");
+  };
+
+  const handlePass = (entry: LikeEntry) => {
+    setLikes(l => l.map(e => e.profile.id === entry.profile.id ? { ...e, passed: true } : e));
+  };
+
+  const visible  = likes.filter(e => filter === "new" ? !e.matched && !e.passed : filter === "matched" ? e.matched : !e.passed);
+  const newCount = likes.filter(e => !e.matched && !e.passed).length;
+
+  const timeAgo = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60)  return `${mins}m ago`;
+    if (mins < 1440) return `${Math.floor(mins / 60)}h ago`;
+    return `${Math.floor(mins / 1440)}d ago`;
+  };
+
+  if (authLoading || fetching) return (
+    <div style={{ minHeight: "100dvh", background: "#0a0a0a", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ textAlign: "center", color: "rgba(255,255,255,0.4)", fontFamily: "system-ui" }}>
+        <div style={{ fontSize: 36, marginBottom: 16 }}>💛</div>
+        <div style={{ fontSize: 14 }}>Loading likes...</div>
+      </div>
+    </div>
+  );
 
   return (
-    <main style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui, sans-serif", display: "flex", flexDirection: "column", color: "#fff", position: "relative" }}>
+    <main style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui", display: "flex", flexDirection: "column", color: "#fff", position: "relative" }}>
 
-      {toast && (
-        <div style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", background: toast.color, color: "#000", fontWeight: 800, fontSize: 15, padding: "12px 28px", borderRadius: 50, zIndex: 99, whiteSpace: "nowrap" }}>{toast.msg}</div>
-      )}
+      {toast && <div style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", background: toast.color, color: "#000", fontWeight: 800, fontSize: 15, padding: "12px 28px", borderRadius: 50, zIndex: 99, whiteSpace: "nowrap" }}>{toast.msg}</div>}
 
       <div style={{ padding: "52px 20px 16px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
@@ -49,40 +117,49 @@ export default function LikesPage() {
       </div>
 
       <div style={{ display: "flex", gap: 8, padding: "0 20px 20px" }}>
-        {(["all", "new", "matched"] as const).map((f) => (
+        {(["all","new","matched"] as const).map(f => (
           <button key={f} onClick={() => setFilter(f)} style={{ background: filter === f ? "#D4AF37" : "rgba(255,255,255,0.07)", border: filter === f ? "none" : "1px solid rgba(255,255,255,0.1)", borderRadius: 50, padding: "7px 18px", fontSize: 13, fontWeight: 700, color: filter === f ? "#000" : "rgba(255,255,255,0.5)", cursor: "pointer", textTransform: "capitalize" }}>{f}</button>
         ))}
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "0 16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
-        {visible.length === 0 && <div style={{ textAlign: "center", color: "rgba(255,255,255,0.25)", fontSize: 14, paddingTop: 60 }}>Nothing here yet 👀</div>}
+        {visible.length === 0 && (
+          <div style={{ textAlign: "center", color: "rgba(255,255,255,0.25)", fontSize: 14, paddingTop: 60 }}>
+            {filter === "new" ? "No new likes yet 👀" : filter === "matched" ? "No matches yet — like someone back!" : "Nothing here yet 👀"}
+          </div>
+        )}
 
-        {visible.map((p) => {
-          const badge = BADGE_COLORS[p.lookingFor] ?? BADGE_COLORS.Casual;
+        {visible.map(entry => {
+          const p     = entry.profile;
+          const badge = BADGE[p.looking_for ?? ""] ?? BADGE.relationship;
+          const photo = avatarUrl(p.photos?.[0] ?? p.avatar_url);
+
           return (
             <div key={p.id} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 20, overflow: "hidden" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 16px 12px" }}>
                 <div style={{ position: "relative", flexShrink: 0 }}>
-                  <div style={{ width: 62, height: 62, borderRadius: "50%", background: p.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, border: p.matched ? "3px solid #D4AF37" : "3px solid rgba(255,255,255,0.08)" }}>{p.emoji}</div>
-                  {p.matched && <div style={{ position: "absolute", bottom: 0, right: 0, width: 20, height: 20, borderRadius: "50%", background: "#D4AF37", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, border: "2px solid #0a0a0a" }}>✓</div>}
+                  <div style={{ width: 62, height: 62, borderRadius: "50%", background: "#1a1a1a", overflow: "hidden", border: entry.matched ? "3px solid #D4AF37" : "3px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 28 }}>🙂</span>}
+                  </div>
+                  {entry.matched && <div style={{ position: "absolute", bottom: 0, right: 0, width: 20, height: 20, borderRadius: "50%", background: "#D4AF37", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, border: "2px solid #0a0a0a" }}>✓</div>}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={{ fontSize: 16, fontWeight: 800 }}>{p.name}, {p.age}</span>
-                      <span style={{ background: badge.bg, color: badge.color, fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 50 }}>{p.lookingFor}</span>
+                      {p.looking_for && <span style={{ background: badge.bg, color: badge.color, fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 50 }}>{p.looking_for.charAt(0).toUpperCase() + p.looking_for.slice(1)}</span>}
                     </div>
-                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", flexShrink: 0 }}>{p.time}</span>
+                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", flexShrink: 0 }}>{timeAgo(entry.created_at)}</span>
                   </div>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 6 }}>📍 {p.location} · {p.distance}</div>
-                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.bio}</p>
+                  {p.location && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 6 }}>📍 {p.location}</div>}
+                  {p.bio && <p style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.bio}</p>}
                 </div>
               </div>
 
-              {!p.matched ? (
+              {!entry.matched ? (
                 <div style={{ display: "flex", gap: 10, padding: "0 16px 16px" }}>
-                  <button onClick={() => handlePass(p.id)}  style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "11px 0", color: "rgba(255,255,255,0.5)", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Pass</button>
-                  <button onClick={() => handleMatch(p.id)} style={{ flex: 2, background: "#D4AF37", border: "none", borderRadius: 12, padding: "11px 0", fontSize: 14, fontWeight: 800, color: "#000", cursor: "pointer" }}>❤️ Like back</button>
+                  <button onClick={() => handlePass(entry)} style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "11px 0", color: "rgba(255,255,255,0.5)", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Pass</button>
+                  <button onClick={() => handleLikeBack(entry)} style={{ flex: 2, background: "#D4AF37", border: "none", borderRadius: 12, padding: "11px 0", fontSize: 14, fontWeight: 800, color: "#000", cursor: "pointer" }}>❤️ Like back</button>
                 </div>
               ) : (
                 <div style={{ display: "flex", gap: 10, padding: "0 16px 16px" }}>
