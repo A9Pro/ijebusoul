@@ -159,15 +159,19 @@ export default function OnboardingPage() {
   const next = async () => {
     setError("");
 
-    if (step === 0) {
-      setLoading(true);
-      const { data, error: err } = await supabase.auth.signUp({ email: form.email, password: form.password });
-      setLoading(false);
-      if (err) { setError(err.message); return; }
-      if (data.user) setUserId(data.user.id);
-      setStep(s => s + 1);
-      return;
-    }
+if (step === 0) {
+  setLoading(true);
+  const { data, error: err } = await supabase.auth.signUp({ email: form.email, password: form.password });
+  if (err) { setError(err.message); setLoading(false); return; }
+  if (data.user) setUserId(data.user.id);
+
+  const { error: signInErr } = await supabase.auth.signInWithPassword({ email: form.email, password: form.password });
+  setLoading(false);
+  if (signInErr) { setError(signInErr.message); return; }
+
+  setStep(s => s + 1);
+  return;
+}
 
     if (step === totalSteps - 1) {
       if (!userId) { setError("Session lost. Please restart."); return; }
