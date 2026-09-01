@@ -2,6 +2,7 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/context/AuthContext";
 
 const IJEBU_AREAS = [
   { lga: "Ijebu Ode",        towns: ["Ijebu Ode","Porogun","Oke Aje","Igbeba","Ijagun","Odo-Esa","Ilese","Itamapako"] },
@@ -89,6 +90,7 @@ const NextBtn = ({ onClick, label = "Continue →", disabled = false, loading = 
 export default function OnboardingPage() {
   const router  = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
+  const { refreshProfile } = useAuth(); // ← added: lets us force-refresh the cached profile after insert
 
   const [step, setStep]                     = useState(0);
   const [loading, setLoading]               = useState(false);
@@ -263,6 +265,12 @@ export default function OnboardingPage() {
         return;
       }
 
+      // ← added: force AuthContext to re-fetch the profile it now has,
+      // so /home's redirect guard (which checks `myProfile`) doesn't
+      // bounce us back to onboarding on stale null state.
+      await refreshProfile();
+
+      setLoading(false);
       router.push("/home");
       return;
     }
