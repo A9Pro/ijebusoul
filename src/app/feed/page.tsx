@@ -141,7 +141,7 @@ export default function FeedPage() {
       setFetching(true);
       const { data: rawPosts } = await supabase
         .from("posts")
-        .select("*, profile:profiles(*)")
+        .select("*, profile:profiles!posts_user_id_fkey(*)")
         .order("created_at", { ascending: false })
         .limit(30);
 
