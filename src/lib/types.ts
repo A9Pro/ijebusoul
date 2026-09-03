@@ -42,8 +42,10 @@ export type Post = {
   caption?: string;
   media_url?: string | null;
   likes_count: number;
+  comments_count: number;
   created_at: string;
   profile: Profile;
   user_liked: boolean;
   user_following: boolean;
+  user_saved: boolean;
 };
