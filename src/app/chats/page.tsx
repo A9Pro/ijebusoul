@@ -44,7 +44,7 @@ export default function ChatsPage() {
       // Get last message + unread count per match
       const enriched = await Promise.all(rawMatches.map(async m => {
         const { data: lastMsgArr } = await supabase
-          .from("messages").select("content, created_at").eq("match_id", m.id).order("created_at", { ascending: false }).limit(1);
+          .from("messages").select("content, created_at").eq("match_id", m.id).order("created_at", { ascending: false }).limit(1);  
         const { count: unread } = await supabase
           .from("messages").select("id", { count: "exact", head: true })
           .eq("match_id", m.id).neq("sender_id", user.id).is("read_at", null);

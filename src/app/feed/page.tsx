@@ -56,7 +56,7 @@ const CreatePostModal = ({ userId, userProfile, onClose, onCreated }: CreatePost
           media_url:   mediaPath,
           likes_count: 0,
         })
-        .select("*, profile:profiles(*)")
+        .select("*, profile:profiles!posts_user_id_fkey(*)")
         .single();
 
       if (insertErr) throw insertErr;
