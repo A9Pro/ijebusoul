@@ -119,13 +119,13 @@ export default function HomePage() {
   const notifText = (n: Notification) => {
     const name = n.actor?.name ?? "Someone";
     switch (n.type) {
-      case "like":      return `${name} liked your profile 💛`;
-      case "superlike": return `${name} super liked you ⭐`;
-      case "match":     return `You matched with ${name} 🎉`;
-      case "post_like": return `${name} liked your post ❤️`;
-      case "comment":   return `${name} commented on your post 💬`;
-      case "follow":    return `${name} started following you`;
-      default:          return "New notification";
+      case "swipe_like":   return `${name} liked your profile 💛`;
+      case "match":        return `You matched with ${name} 🎉`;
+      case "post_like":    return `${name} liked your post ❤️`;
+      case "post_comment": return `${name} commented on your post 💬`;
+      case "follow":       return `${name} started following you`;
+      case "message":      return `${name} sent you a message`;
+      default:              return "New notification";
     }
   };
 
