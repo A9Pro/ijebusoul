@@ -140,8 +140,9 @@ export default function HomePage() {
         <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", fontWeight: 500 }}>{profiles.length - index} profiles near you</span>
       </div>
 
-      <div style={{ flex: 1, padding: "0 14px", display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ position: "relative", borderRadius: 28, overflow: "hidden", background: "#1a1a1a", flex: 1, minHeight: 500 }}>
+      {/* ── flex:1 content — bottom padding reserves space for the fixed BottomNav ── */}
+      <div style={{ flex: 1, padding: "0 14px 100px", display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ position: "relative", borderRadius: 28, overflow: "hidden", background: "#1a1a1a", flex: 1, minHeight: 460 }}>
 
           {photoSrc ? (
             <img src={photoSrc} alt={current.name} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
