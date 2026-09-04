@@ -6,6 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import BottomNav from "@/components/BottomNav";
 import Header from "@/components/Header";
+import ProfilePreviewModal from "@/components/ProfilePreviewModal";
 import type { Profile } from "@/lib/types";
 
 const BADGE: Record<string, { bg: string; color: string }> = {
@@ -26,6 +27,7 @@ export default function LikesPage() {
   const [fetching, setFetching] = useState(true);
   const [filter, setFilter]     = useState<"all" | "new" | "matched">("all");
   const [toast, setToast]       = useState<{ msg: string; color: string } | null>(null);
+  const [previewProfile, setPreviewProfile] = useState<Profile | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/");
@@ -141,6 +143,8 @@ export default function LikesPage() {
 
       <Header />
 
+      {previewProfile && <ProfilePreviewModal profile={previewProfile} onClose={() => setPreviewProfile(null)} />}
+
       {toast && (
         <div style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", background: toast.color, color: "#000", fontWeight: 800, fontSize: 15, padding: "12px 28px", borderRadius: 50, zIndex: 99, whiteSpace: "nowrap" }}>
           {toast.msg}
@@ -175,7 +179,7 @@ export default function LikesPage() {
 
           return (
             <div key={p.id} style={{ background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 20, overflow: "hidden" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 16px 12px" }}>
+              <div onClick={() => setPreviewProfile(p)} style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 16px 12px", cursor: "pointer" }}>
                 <div style={{ position: "relative", flexShrink: 0 }}>
                   <div style={{ width: 62, height: 62, borderRadius: "50%", background: colors.bg, overflow: "hidden", border: entry.matched ? "3px solid #D4AF37" : `3px solid ${colors.border}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                     {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : <span style={{ fontSize: 28 }}>🙂</span>}

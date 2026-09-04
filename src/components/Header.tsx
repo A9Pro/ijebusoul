@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { supabase, avatarUrl } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme, type Theme } from "@/context/ThemeContext";
+import ProfilePreviewModal from "@/components/ProfilePreviewModal";
 import type { Profile } from "@/lib/types";
 
 interface NotificationRow {
@@ -47,11 +48,11 @@ export default function Header() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [notifLoading, setNotifLoading]   = useState(false);
+  const [previewProfile, setPreviewProfile] = useState<Profile | null>(null);
 
   const notifRef = useRef<HTMLDivElement>(null);
   const themeRef = useRef<HTMLDivElement>(null);
 
-  // ── Close dropdowns on outside click ──────────────────────────────────────
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const t = e.target as Node;
@@ -62,7 +63,6 @@ export default function Header() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // ── Unread count (initial + realtime) ─────────────────────────────────────
   useEffect(() => {
     if (!user) return;
     (async () => {
@@ -84,7 +84,6 @@ export default function Header() {
     return () => { supabase.removeChannel(channel); };
   }, [user]);
 
-  // ── Fetch feed when dropdown opens, mark as read ──────────────────────────
   const openNotifications = async () => {
     const opening = !notifOpen;
     setNotifOpen(opening);
@@ -107,6 +106,13 @@ export default function Header() {
     }
   };
 
+  const goToTarget = (n: NotificationRow) => {
+    setNotifOpen(false);
+    if (n.type === "post_like" || n.type === "post_comment") router.push("/feed");
+    else if (n.type === "swipe_like") router.push("/likes");
+    else if (n.type === "match" || n.type === "message") router.push("/chats");
+  };
+
   const THEME_OPTIONS: { id: Theme; label: string; icon: string; desc: string }[] = [
     { id: "light", label: "Light",     icon: "☀️", desc: "Clean & bright" },
     { id: "dark",  label: "Dark",      icon: "🌙", desc: "Easy on the eyes" },
@@ -120,9 +126,10 @@ export default function Header() {
       background: colors.bg, borderBottom: `1px solid ${colors.border}`,
       fontFamily: "system-ui",
     }}>
+      {previewProfile && <ProfilePreviewModal profile={previewProfile} onClose={() => setPreviewProfile(null)} />}
+
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px" }}>
 
-        {/* Logo + brand */}
         <div onClick={() => router.push("/home")} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
           <IjebuSoulLogo accent={colors.accent} stroke={colors.text} />
           <span style={{ fontSize: 19, fontWeight: 900, letterSpacing: "-0.02em", color: colors.text }}>
@@ -132,7 +139,6 @@ export default function Header() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
 
-          {/* Notification bell + dropdown */}
           <div ref={notifRef} style={{ position: "relative" }}>
             <button onClick={openNotifications} style={{
               width: 36, height: 36, borderRadius: "50%",
@@ -179,10 +185,13 @@ export default function Header() {
                         borderBottom: `1px solid ${colors.border}`,
                         background: n.read ? "transparent" : `${colors.accent}10`,
                       }}>
-                        <div style={{ width: 32, height: 32, borderRadius: "50%", background: colors.bg, overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <div
+                          onClick={() => n.actor && setPreviewProfile(n.actor)}
+                          style={{ width: 32, height: 32, borderRadius: "50%", background: colors.bg, overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: n.actor ? "pointer" : "default" }}
+                        >
                           {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : <span>{ICON[n.type]}</span>}
                         </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
+                        <div onClick={() => goToTarget(n)} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
                           <div style={{ fontSize: 12.5, color: colors.text, lineHeight: 1.4 }}>{COPY[n.type](name)}</div>
                           <div style={{ fontSize: 10, color: colors.subtext, marginTop: 2 }}>{timeAgo(n.created_at)} ago</div>
                         </div>
@@ -202,7 +211,6 @@ export default function Header() {
             )}
           </div>
 
-          {/* Theme switcher */}
           <div ref={themeRef} style={{ position: "relative" }}>
             <button onClick={() => { setThemeOpen(!themeOpen); setNotifOpen(false); }} style={{
               height: 36, display: "flex", alignItems: "center", gap: 5,
@@ -238,7 +246,6 @@ export default function Header() {
             )}
           </div>
 
-          {/* Profile */}
           <button onClick={() => router.push("/profile")} style={{
             width: 36, height: 36, borderRadius: "50%", background: colors.card,
             border: `1px solid ${colors.border}`, display: "flex", alignItems: "center",

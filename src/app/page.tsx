@@ -1,147 +1,77 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase, avatarUrl } from "@/lib/supabase";
-import { useAuth } from "@/context/AuthContext";
-import BottomNav from "@/components/BottomNav";
-import Header from "@/components/Header";
-import type { Profile } from "@/lib/types";
+import { supabase } from "@/lib/supabase";
 
-const BADGE: Record<string, { bg: string; color: string; emoji: string }> = {
-  relationship: { bg: "rgba(255,51,102,0.25)",  color: "#FF3366", emoji: "💍" },
-  casual:       { bg: "rgba(96,165,250,0.25)",   color: "#60A5FA", emoji: "🌊" },
-  friendship:   { bg: "rgba(212,175,55,0.25)",   color: "#D4AF37", emoji: "☕" },
-  fwb:          { bg: "rgba(52,211,153,0.25)",   color: "#34D399", emoji: "🤙🏾" },
-};
+const inputStyle = {
+  width: "100%", background: "rgba(255,255,255,0.1)",
+  border: "1.5px solid rgba(255,255,255,0.25)", borderRadius: 14,
+  padding: "16px 18px", fontSize: 16, color: "#fff", outline: "none",
+  fontFamily: "system-ui, sans-serif",
+} as React.CSSProperties;
 
-type Toast = { label: string; color: string } | null;
-
-export default function HomePage() {
+export default function LoginPage() {
   const router = useRouter();
-  const { user, profile: myProfile, loading: authLoading } = useAuth();
+  const [email, setEmail]       = useState("");
+  const [password, setPassword] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState("");
 
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [index, setIndex]       = useState(0);
-  const [toast, setToast]       = useState<Toast>(null);
-  const [fetching, setFetching] = useState(true);
-
-  useEffect(() => {
-    if (!authLoading && !user) router.replace("/");
-    if (!authLoading && user && !myProfile) router.replace("/onboarding");
-  }, [authLoading, user, myProfile]);
-
-  useEffect(() => {
-    if (!user) return;
-    (async () => {
-      setFetching(true);
-      const { data: swipes } = await supabase
-        .from("swipes").select("swiped_id").eq("swiper_id", user.id);
-      const swipedIds = swipes?.map(s => s.swiped_id) ?? [];
-
-      let query = supabase.from("profiles").select("*").neq("id", user.id).limit(30);
-      if (swipedIds.length > 0) query = query.not("id", "in", `(${swipedIds.join(",")})`);
-
-      const { data } = await query;
-      setProfiles((data as Profile[]) ?? []);
-      setFetching(false);
-    })();
-  }, [user]);
-
-  const showToast = (label: string, color: string) => {
-    setToast({ label, color });
-    setTimeout(() => setToast(null), 1200);
+  const handleSignIn = async () => {
+    if (!email || !password) { setError("Please fill in all fields."); return; }
+    setLoading(true); setError("");
+    const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+    if (err) { setError(err.message); setLoading(false); return; }
+    router.push("/home");
   };
-
-  const advance = () => setIndex(i => i + 1);
-
-  const swipe = async (action: "like" | "pass" | "superlike") => {
-    if (!user || !current) return;
-    await supabase.from("swipes").insert({ swiper_id: user.id, swiped_id: current.id, action });
-    if (action === "like")      showToast("Liked! 💛", "#D4AF37");
-    if (action === "pass")      showToast("Passed", "#888");
-    if (action === "superlike") showToast("Super Liked! ⭐", "#60A5FA");
-    setTimeout(advance, 350);
-  };
-
-  if (authLoading || fetching) return (
-    <div style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
-      <Header />
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ textAlign: "center", color: "rgba(255,255,255,0.4)" }}>
-          <div style={{ fontSize: 36, marginBottom: 16 }}>✨</div>
-          <div style={{ fontSize: 14 }}>Finding people near you...</div>
-        </div>
-      </div>
-      <BottomNav />
-    </div>
-  );
-
-  const current = profiles[index];
-
-  if (!current) return (
-    <main style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui", display: "flex", flexDirection: "column", color: "#fff" }}>
-      <Header />
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: "0 32px" }}>
-        <div style={{ fontSize: 64 }}>👀</div>
-        <h2 style={{ fontSize: 22, fontWeight: 900, textAlign: "center", letterSpacing: "-0.02em" }}>You've seen everyone nearby</h2>
-        <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", textAlign: "center" }}>Check back soon — new people join daily.</p>
-        <button onClick={() => setIndex(0)} style={{ background: "#D4AF37", border: "none", borderRadius: 50, padding: "12px 28px", fontSize: 14, fontWeight: 700, color: "#000", cursor: "pointer", marginTop: 8 }}>Refresh</button>
-      </div>
-      <BottomNav />
-    </main>
-  );
-
-  const badge    = BADGE[current.looking_for ?? ""] ?? BADGE.relationship;
-  const photoSrc = avatarUrl(current.photos?.[0] ?? current.avatar_url);
 
   return (
-    <main style={{ minHeight: "100dvh", width: "100%", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
+    <main style={{ minHeight: "100dvh", width: "100%", position: "relative", fontFamily: "system-ui, sans-serif", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", padding: "0 24px 52px", maxWidth: 430, margin: "0 auto", overflow: "hidden" }}>
+      <div style={{ position: "absolute", inset: 0, backgroundImage: "url('/ijebu-bg.jpg')", backgroundSize: "cover", backgroundPosition: "center top", zIndex: 0 }} />
+      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.3) 40%, rgba(0,0,0,0.88) 65%, rgba(0,0,0,0.97) 100%)", zIndex: 1 }} />
 
-      <Header />
-
-      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "12px 20px 12px" }}>
-        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", fontWeight: 500 }}>{profiles.length - index} profiles near you</span>
+      <div style={{ position: "absolute", top: 52, left: 0, right: 0, display: "flex", justifyContent: "center", zIndex: 2 }}>
+        <div style={{ background: "rgba(255,255,255,0.12)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 50, padding: "8px 20px" }}>
+          <span style={{ fontSize: 18, fontWeight: 900, color: "#fff", letterSpacing: "-0.02em" }}>ìjèbú<span style={{ color: "#D4AF37" }}>soul</span></span>
+        </div>
       </div>
 
-      <div style={{ flex: 1, padding: "0 14px 100px", display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ position: "relative", borderRadius: 28, overflow: "hidden", background: "#1a1a1a", flex: 1, minHeight: 460 }}>
+      <div style={{ position: "relative", zIndex: 2, width: "100%", maxWidth: 380 }}>
+        <h1 style={{ fontSize: 34, fontWeight: 900, color: "#fff", letterSpacing: "-0.03em", lineHeight: 1.1, marginBottom: 8 }}>Welcome back 👋</h1>
+        <p style={{ fontSize: 15, color: "rgba(255,255,255,0.55)", marginBottom: 32 }}>Sign in to continue your journey</p>
 
-          {photoSrc ? (
-            <img src={photoSrc} alt={current.name} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
-          ) : (
-            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 120 }}>🙂</div>
-          )}
+        {error && (
+          <div style={{ background: "rgba(255,51,102,0.15)", border: "1px solid rgba(255,51,102,0.4)", borderRadius: 12, padding: "12px 16px", fontSize: 13, color: "#FF3366", marginBottom: 20 }}>{error}</div>
+        )}
 
-          {toast && (
-            <div style={{ position: "absolute", top: "40%", left: "50%", transform: "translate(-50%,-50%)", background: toast.color, color: "#fff", fontSize: 17, fontWeight: 800, padding: "12px 28px", borderRadius: 50, whiteSpace: "nowrap", zIndex: 20 }}>{toast.label}</div>
-          )}
-
-          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.6) 50%, transparent 100%)", padding: "60px 20px 20px", zIndex: 5 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ fontSize: 28, fontWeight: 900, color: "#fff" }}>{current.name}</span>
-                <span style={{ fontSize: 22, fontWeight: 700, color: "rgba(255,255,255,0.6)" }}>{current.age}</span>
-              </div>
-              <span style={{ background: badge.bg, color: badge.color, fontSize: 12, fontWeight: 700, padding: "5px 12px", borderRadius: 50, border: `1px solid ${badge.color}40` }}>
-                {badge.emoji} {current.looking_for ? current.looking_for.charAt(0).toUpperCase() + current.looking_for.slice(1) : ""}
-              </span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 20 }}>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.5)", letterSpacing: "0.06em", textTransform: "uppercase", display: "block", marginBottom: 8 }}>Email</label>
+            <input type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} style={inputStyle} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.5)", letterSpacing: "0.06em", textTransform: "uppercase", display: "block", marginBottom: 8 }}>Password</label>
+            <div style={{ position: "relative" }}>
+              <input type={showPass ? "text" : "password"} placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSignIn()} style={{ ...inputStyle, paddingRight: 52 }} />
+              <button onClick={() => setShowPass(!showPass)} style={{ position: "absolute", right: 16, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "rgba(255,255,255,0.5)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{showPass ? "Hide" : "Show"}</button>
             </div>
-            {current.location && <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>📍 {current.location}</div>}
-            {current.bio && <p style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", lineHeight: 1.55, marginBottom: 14, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{current.bio}</p>}
-            <button onClick={() => router.push("/chats")} style={{ width: "100%", background: "rgba(255,255,255,0.1)", backdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 12, padding: "12px 0", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>💬 Send a message</button>
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, padding: "4px 0 8px" }}>
-          <button onClick={() => swipe("pass")}      style={{ width: 54, height: 54, borderRadius: "50%", background: "rgba(255,255,255,0.07)", border: "1.5px solid rgba(255,255,255,0.12)", fontSize: 22, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>👎</button>
-          <button onClick={() => swipe("superlike")} style={{ width: 50, height: 50, borderRadius: "50%", background: "rgba(96,165,250,0.12)", border: "1.5px solid rgba(96,165,250,0.3)", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>⭐</button>
-          <button onClick={() => swipe("like")}      style={{ width: 68, height: 68, borderRadius: "50%", background: "#D4AF37", border: "none", fontSize: 26, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>❤️</button>
-          <button onClick={advance}                  style={{ width: 50, height: 50, borderRadius: "50%", background: "rgba(167,139,250,0.12)", border: "1.5px solid rgba(167,139,250,0.3)", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>🔖</button>
-          <button onClick={() => swipe("like")}      style={{ width: 54, height: 54, borderRadius: "50%", background: "rgba(255,51,102,0.1)", border: "1.5px solid rgba(255,51,102,0.25)", fontSize: 22, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>⚡</button>
+        <div style={{ textAlign: "right", marginBottom: 28 }}>
+          <span style={{ fontSize: 13, color: "#D4AF37", fontWeight: 600, cursor: "pointer" }}>Forgot password?</span>
         </div>
-      </div>
 
-      <BottomNav />
+        <button onClick={handleSignIn} disabled={loading} style={{ width: "100%", background: loading ? "rgba(212,175,55,0.5)" : "#D4AF37", color: "#000", fontSize: 16, fontWeight: 800, border: "none", padding: "18px 0", borderRadius: 14, cursor: loading ? "not-allowed" : "pointer", marginBottom: 16 }}>
+          {loading ? "Signing in..." : "Sign in"}
+        </button>
+
+        <p style={{ textAlign: "center", fontSize: 14, color: "rgba(255,255,255,0.5)" }}>
+          Don't have an account?{" "}
+          <span onClick={() => router.push("/onboarding")} style={{ color: "#D4AF37", fontWeight: 700, cursor: "pointer" }}>Create profile</span>
+        </p>
+      </div>
     </main>
   );
 }

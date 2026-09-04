@@ -6,6 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import BottomNav from "@/components/BottomNav";
 import Header from "@/components/Header";
+import ProfilePreviewModal from "@/components/ProfilePreviewModal";
 import type { Match, Message, Profile } from "@/lib/types";
 
 export default function ChatsPage() {
@@ -19,6 +20,7 @@ export default function ChatsPage() {
   const [messages, setMessages]     = useState<Message[]>([]);
   const [draft, setDraft]           = useState("");
   const [sending, setSending]       = useState(false);
+  const [previewProfile, setPreviewProfile] = useState<Profile | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -136,15 +138,19 @@ export default function ChatsPage() {
     return (
       <main style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: colors.bg, fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
 
+        {previewProfile && <ProfilePreviewModal profile={previewProfile} onClose={() => setPreviewProfile(null)} />}
+
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "52px 20px 16px", borderBottom: `1px solid ${colors.border}`, background: colors.bg }}>
           <button onClick={() => setActiveMatch(null)} style={{ background: colors.card, border: `1px solid ${colors.border}`, borderRadius: "50%", width: 36, height: 36, color: colors.text, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>←</button>
-          <div style={{ width: 42, height: 42, borderRadius: "50%", background: colors.card, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
-            {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 22 }}>🙂</span>}
-            {isOnline && <div style={{ position: "absolute", bottom: 1, right: 1, width: 11, height: 11, borderRadius: "50%", background: "#22C55E", border: `2px solid ${colors.bg}` }} />}
-          </div>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: colors.text }}>{other?.name}</div>
-            <div style={{ fontSize: 12, color: isOnline ? "#22C55E" : colors.subtext, fontWeight: 500 }}>{isOnline ? "Online now" : "Offline"}</div>
+          <div onClick={() => other && setPreviewProfile(other)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+            <div style={{ width: 42, height: 42, borderRadius: "50%", background: colors.card, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+              {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 22 }}>🙂</span>}
+              {isOnline && <div style={{ position: "absolute", bottom: 1, right: 1, width: 11, height: 11, borderRadius: "50%", background: "#22C55E", border: `2px solid ${colors.bg}` }} />}
+            </div>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: colors.text }}>{other?.name}</div>
+              <div style={{ fontSize: 12, color: isOnline ? "#22C55E" : colors.subtext, fontWeight: 500 }}>{isOnline ? "Online now" : "Offline"}</div>
+            </div>
           </div>
         </div>
 
@@ -178,6 +184,8 @@ export default function ChatsPage() {
 
       <Header />
 
+      {previewProfile && <ProfilePreviewModal profile={previewProfile} onClose={() => setPreviewProfile(null)} />}
+
       <div style={{ padding: "20px 20px 16px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
           <h1 style={{ fontSize: 26, fontWeight: 900, color: colors.text, letterSpacing: "-0.03em" }}>Messages</h1>
@@ -194,14 +202,14 @@ export default function ChatsPage() {
               const photo = avatarUrl(m.other_user?.photos?.[0] ?? m.other_user?.avatar_url);
               const isOnline = m.other_user?.online_at && (Date.now() - new Date(m.other_user.online_at).getTime()) < 300000;
               return (
-                <div key={m.id} onClick={() => setActiveMatch(m)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, cursor: "pointer", flexShrink: 0 }}>
-                  <div style={{ position: "relative" }}>
+                <div key={m.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                  <div onClick={() => m.other_user && setPreviewProfile(m.other_user)} style={{ position: "relative", cursor: "pointer" }}>
                     <div style={{ width: 58, height: 58, borderRadius: "50%", background: colors.card, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", border: isOnline ? "2.5px solid #22C55E" : `2.5px solid ${colors.border}` }}>
                       {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 28 }}>🙂</span>}
                     </div>
                     {isOnline && <div style={{ position: "absolute", bottom: 2, right: 2, width: 13, height: 13, borderRadius: "50%", background: "#22C55E", border: `2.5px solid ${colors.bg}` }} />}
                   </div>
-                  <span style={{ fontSize: 11, color: colors.subtext, fontWeight: 600 }}>{m.other_user?.name}</span>
+                  <span onClick={() => setActiveMatch(m)} style={{ fontSize: 11, color: colors.subtext, fontWeight: 600, cursor: "pointer" }}>{m.other_user?.name}</span>
                 </div>
               );
             })}
@@ -225,14 +233,14 @@ export default function ChatsPage() {
                 const photo = avatarUrl(m.other_user?.photos?.[0] ?? m.other_user?.avatar_url);
                 const isOnline = m.other_user?.online_at && (Date.now() - new Date(m.other_user.online_at).getTime()) < 300000;
                 return (
-                  <div key={m.id} onClick={() => setActiveMatch(m)} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 10px", borderRadius: 16, cursor: "pointer", background: m.unread_count > 0 ? "rgba(212,175,55,0.06)" : "transparent" }}>
-                    <div style={{ position: "relative", flexShrink: 0 }}>
+                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 10px", borderRadius: 16, background: m.unread_count > 0 ? "rgba(212,175,55,0.06)" : "transparent" }}>
+                    <div onClick={() => m.other_user && setPreviewProfile(m.other_user)} style={{ position: "relative", flexShrink: 0, cursor: "pointer" }}>
                       <div style={{ width: 52, height: 52, borderRadius: "50%", background: colors.card, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
                         {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 26 }}>🙂</span>}
                       </div>
                       {isOnline && <div style={{ position: "absolute", bottom: 2, right: 2, width: 12, height: 12, borderRadius: "50%", background: "#22C55E", border: `2.5px solid ${colors.bg}` }} />}
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div onClick={() => setActiveMatch(m)} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
                         <span style={{ fontSize: 15, fontWeight: m.unread_count > 0 ? 800 : 600, color: colors.text }}>{m.other_user?.name}</span>
                         <span style={{ fontSize: 11, color: m.unread_count > 0 ? "#D4AF37" : colors.subtext, fontWeight: m.unread_count > 0 ? 700 : 400 }}>{timeAgo(m.last_message_at)}</span>
