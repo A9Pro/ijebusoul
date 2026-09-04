@@ -22,7 +22,6 @@ export default function ChatsPage() {
     if (!authLoading && !user) router.replace("/");
   }, [authLoading, user]);
 
-  // Fetch matches
   useEffect(() => {
     if (!user) return;
     (async () => {
@@ -35,16 +34,14 @@ export default function ChatsPage() {
 
       if (!rawMatches?.length) { setMatches([]); setFetching(false); return; }
 
-      // Get other user profiles
       const otherIds = rawMatches.map(m => m.user1_id === user.id ? m.user2_id : m.user1_id);
       const { data: profiles } = await supabase.from("profiles").select("*").in("id", otherIds);
       const profileMap: Record<string, Profile> = {};
       profiles?.forEach(p => { profileMap[p.id] = p as Profile; });
 
-      // Get last message + unread count per match
       const enriched = await Promise.all(rawMatches.map(async m => {
         const { data: lastMsgArr } = await supabase
-          .from("messages").select("content, created_at").eq("match_id", m.id).order("created_at", { ascending: false }).limit(1);  
+          .from("messages").select("content, created_at").eq("match_id", m.id).order("created_at", { ascending: false }).limit(1);
         const { count: unread } = await supabase
           .from("messages").select("id", { count: "exact", head: true })
           .eq("match_id", m.id).neq("sender_id", user.id).is("read_at", null);
@@ -63,7 +60,6 @@ export default function ChatsPage() {
     })();
   }, [user]);
 
-  // Open conversation: fetch messages + subscribe to real-time
   useEffect(() => {
     if (!activeMatch || !user) return;
 
@@ -72,7 +68,6 @@ export default function ChatsPage() {
         .from("messages").select("*").eq("match_id", activeMatch.id).order("created_at");
       setMessages((data as Message[]) ?? []);
 
-      // Mark as read
       await supabase.from("messages")
         .update({ read_at: new Date().toISOString() })
         .eq("match_id", activeMatch.id).neq("sender_id", user.id).is("read_at", null);
@@ -91,7 +86,6 @@ export default function ChatsPage() {
     return () => { supabase.removeChannel(channel); };
   }, [activeMatch, user]);
 
-  // Scroll to bottom when messages update
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -119,15 +113,17 @@ export default function ChatsPage() {
   };
 
   if (authLoading || fetching) return (
-    <div style={{ minHeight: "100dvh", background: "#0a0a0a", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ textAlign: "center", color: "rgba(255,255,255,0.4)", fontFamily: "system-ui" }}>
-        <div style={{ fontSize: 36, marginBottom: 16 }}>💬</div>
-        <div style={{ fontSize: 14 }}>Loading chats...</div>
+    <div style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ textAlign: "center", color: "rgba(255,255,255,0.4)" }}>
+          <div style={{ fontSize: 36, marginBottom: 16 }}>💬</div>
+          <div style={{ fontSize: 14 }}>Loading chats...</div>
+        </div>
       </div>
+      <BottomNav />
     </div>
   );
 
-  // ── Conversation view ──
   if (activeMatch) {
     const other = activeMatch.other_user;
     const photo = avatarUrl(other?.photos?.[0] ?? other?.avatar_url);
@@ -171,7 +167,6 @@ export default function ChatsPage() {
     );
   }
 
-  // ── Chats list ──
   const totalUnread = matches.reduce((s, m) => s + m.unread_count, 0);
 
   return (

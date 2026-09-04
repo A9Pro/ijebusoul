@@ -15,6 +15,8 @@ interface CommentItem {
   profile?: { name: string; avatar_url?: string | null; photos?: string[] } | null;
 }
 
+const BG_COLORS = ["#1a1a2e", "#2e1a1a", "#1a2e1e", "#2e2a1a", "#241a2e", "#1a2830", "#000000", "#3a2a1a"];
+
 // ── Post creation / edit modal ────────────────────────────────────────────────
 interface CreatePostModalProps {
   userId: string;
@@ -29,6 +31,7 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated }:
   const isEditing                 = !!editingPost;
   const [caption, setCaption]     = useState(editingPost?.caption ?? "");
   const [postType, setPostType]   = useState<"text" | "photo">(editingPost?.type === "photo" ? "photo" : "text");
+  const [bgColor, setBgColor]     = useState(editingPost?.bg_color ?? BG_COLORS[0]);
   const [file, setFile]           = useState<File | null>(null);
   const [preview, setPreview]     = useState<string | null>(
     editingPost?.type === "photo" ? postMediaUrl(editingPost.media_url) : null
@@ -83,6 +86,7 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated }:
             type:      postType === "photo" && mediaPath ? "photo" : "text",
             caption:   caption.trim(),
             media_url: postType === "photo" ? mediaPath : null,
+            bg_color:  bgColor,
           })
           .eq("id", editingPost.id)
           .select("*, profile:profiles!posts_user_id_fkey(*)")
@@ -118,6 +122,7 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated }:
           type:            file ? "photo" : "text",
           caption:         caption.trim(),
           media_url:       mediaPath,
+          bg_color:        bgColor,
           likes_count:     0,
           comments_count:  0,
         })
@@ -153,6 +158,31 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated }:
             </button>
           ))}
         </div>
+
+        {/* Text background preview + color swatches */}
+        {postType === "text" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ background: bgColor, borderRadius: 16, padding: "20px 18px", minHeight: 90, display: "flex", alignItems: "center", transition: "background 0.15s" }}>
+              <p style={{ fontSize: 15, color: "#fff", lineHeight: 1.5, fontWeight: 500, fontStyle: "italic" }}>
+                {caption.trim() ? `"${caption}"` : "Preview your text post..."}
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {BG_COLORS.map(c => (
+                <button
+                  key={c}
+                  onClick={() => setBgColor(c)}
+                  aria-label={`Background ${c}`}
+                  style={{
+                    width: 30, height: 30, borderRadius: "50%", background: c, cursor: "pointer",
+                    border: bgColor === c ? "2px solid #D4AF37" : "2px solid rgba(255,255,255,0.15)",
+                    boxShadow: bgColor === c ? "0 0 0 2px rgba(212,175,55,0.3)" : "none",
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Photo picker */}
         {postType === "photo" && (
@@ -385,12 +415,16 @@ export default function FeedPage() {
     return `${Math.floor(mins / 1440)}d ago`;
   };
 
+  // ── Loading (BottomNav now always renders, even here) ─────────────────────
   if (authLoading || fetching) return (
-    <div style={{ minHeight: "100dvh", background: "#0a0a0a", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ textAlign: "center", color: "rgba(255,255,255,0.4)", fontFamily: "system-ui" }}>
-        <div style={{ fontSize: 36, marginBottom: 16 }}>▶️</div>
-        <div style={{ fontSize: 14 }}>Loading feed...</div>
+    <div style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ textAlign: "center", color: "rgba(255,255,255,0.4)" }}>
+          <div style={{ fontSize: 36, marginBottom: 16 }}>▶️</div>
+          <div style={{ fontSize: 14 }}>Loading feed...</div>
+        </div>
       </div>
+      <BottomNav />
     </div>
   );
 
@@ -473,7 +507,7 @@ export default function FeedPage() {
 
               {/* Content */}
               {post.type === "text" ? (
-                <div style={{ margin: "0 16px 12px", background: "#1a1a2e", borderRadius: 18, padding: "24px 20px", minHeight: 120, display: "flex", alignItems: "center" }}>
+                <div style={{ margin: "0 16px 12px", background: post.bg_color || "#1a1a2e", borderRadius: 18, padding: "24px 20px", minHeight: 120, display: "flex", alignItems: "center" }}>
                   <p style={{ fontSize: 16, color: "#fff", lineHeight: 1.6, fontWeight: 500, fontStyle: "italic" }}>"{post.caption}"</p>
                 </div>
               ) : media ? (

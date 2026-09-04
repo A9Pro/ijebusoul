@@ -41,6 +41,7 @@ export type Post = {
   type: "photo" | "video" | "text";
   caption?: string;
   media_url?: string | null;
+  bg_color?: string;
   likes_count: number;
   comments_count: number;
   created_at: string;
@@ -48,4 +49,16 @@ export type Post = {
   user_liked: boolean;
   user_following: boolean;
   user_saved: boolean;
+};
+
+export type Notification = {
+  id: string;
+  user_id: string;
+  actor_id: string | null;
+  type: "post_like" | "post_comment" | "swipe_like" | "match" | "message" | "follow";
+  post_id?: string | null;
+  message_id?: string | null;
+  read: boolean;
+  created_at: string;
+  actor?: Profile;
 };

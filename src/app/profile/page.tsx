@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { supabase, avatarUrl, uploadAvatar } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import BottomNav from "@/components/BottomNav";
+import type { Profile } from "@/lib/types";
 
 const INTEREST_SUGGESTIONS = ["Suya lover","Owanbe ready","AFC Ijebu","Egusi connoisseur","Owambe DJ","Yoruba culture","Beach trips","Deep convos","Food lover","Music head"];
 
@@ -17,6 +18,44 @@ export default function ProfilePage() {
   const [activeTab, setActiveTab]     = useState<"photos" | "about">("photos");
   const [draft, setDraft]             = useState<Record<string, any> | null>(null);
   const [newInterest, setNewInterest] = useState("");
+
+  // ── Stats (likes received / matches / followers / following) ──────────────
+  const [stats, setStats] = useState({ likes: 0, matches: 0, followers: 0, following: 0 });
+  const [listModal, setListModal]       = useState<null | "followers" | "following">(null);
+  const [listProfiles, setListProfiles] = useState<Profile[]>([]);
+  const [listLoading, setListLoading]   = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const [likesRes, matchesRes, followersRes, followingRes] = await Promise.all([
+        supabase.from("swipes").select("id", { count: "exact", head: true }).eq("swiped_id", user.id).in("action", ["like", "superlike"]),
+        supabase.from("matches").select("id", { count: "exact", head: true }).or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`),
+        supabase.from("follows").select("follower_id", { count: "exact", head: true }).eq("following_id", user.id),
+        supabase.from("follows").select("following_id", { count: "exact", head: true }).eq("follower_id", user.id),
+      ]);
+      setStats({
+        likes:     likesRes.count ?? 0,
+        matches:   matchesRes.count ?? 0,
+        followers: followersRes.count ?? 0,
+        following: followingRes.count ?? 0,
+      });
+    })();
+  }, [user]);
+
+  const openList = async (kind: "followers" | "following") => {
+    if (!user) return;
+    setListModal(kind);
+    setListLoading(true);
+    const filterCol = kind === "followers" ? "following_id" : "follower_id";
+    const idCol      = kind === "followers" ? "follower_id" : "following_id";
+    const { data: rows } = await supabase.from("follows").select(idCol).eq(filterCol, user.id);
+    const ids = (rows ?? []).map((r: any) => r[idCol]);
+    if (!ids.length) { setListProfiles([]); setListLoading(false); return; }
+    const { data: profs } = await supabase.from("profiles").select("*").in("id", ids);
+    setListProfiles((profs as Profile[]) ?? []);
+    setListLoading(false);
+  };
 
   const startEdit = () => {
     setDraft({ ...profile, interests: [...(profile?.interests ?? [])] });
@@ -61,16 +100,75 @@ export default function ProfilePage() {
   }, [authLoading, user]);
 
   if (authLoading || !profile) return (
-    <div style={{ minHeight: "100dvh", background: "#0a0a0a", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ textAlign: "center", color: "rgba(255,255,255,0.4)", fontFamily: "system-ui" }}>
-        <div style={{ fontSize: 36, marginBottom: 16 }}>👤</div>
-        <div style={{ fontSize: 14 }}>Loading profile...</div>
+    <div style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ textAlign: "center", color: "rgba(255,255,255,0.4)" }}>
+          <div style={{ fontSize: 36, marginBottom: 16 }}>👤</div>
+          <div style={{ fontSize: 14 }}>Loading profile...</div>
+        </div>
       </div>
+      <BottomNav />
     </div>
   );
 
   const photos  = profile.photos ?? [];
   const mainPic = avatarUrl(photos[0] ?? profile.avatar_url);
+
+  const statBtnStyle: React.CSSProperties = { background: "none", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: 4 };
+  const statNumStyle: React.CSSProperties = { fontSize: 18, fontWeight: 900, color: "#fff" };
+  const statLabelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.4)" };
+
+  const StatsRow = (
+    <div style={{ display: "flex", justifyContent: "center", gap: 30, padding: "4px 20px 20px" }}>
+      <button onClick={() => router.push("/likes")} style={statBtnStyle}>
+        <div style={statNumStyle}>{stats.likes}</div>
+        <div style={statLabelStyle}>Likes</div>
+      </button>
+      <button onClick={() => router.push("/chats")} style={statBtnStyle}>
+        <div style={statNumStyle}>{stats.matches}</div>
+        <div style={statLabelStyle}>Matches</div>
+      </button>
+      <button onClick={() => openList("followers")} style={statBtnStyle}>
+        <div style={statNumStyle}>{stats.followers}</div>
+        <div style={statLabelStyle}>Followers</div>
+      </button>
+      <button onClick={() => openList("following")} style={statBtnStyle}>
+        <div style={statNumStyle}>{stats.following}</div>
+        <div style={statLabelStyle}>Following</div>
+      </button>
+    </div>
+  );
+
+  const ListModal = listModal && (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+      <div style={{ width: "100%", maxWidth: 430, maxHeight: "70vh", background: "#111", borderRadius: "24px 24px 0 0", padding: "20px 20px 40px", display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 style={{ fontSize: 17, fontWeight: 900, color: "#fff", textTransform: "capitalize" }}>{listModal}</h2>
+          <button onClick={() => setListModal(null)} style={{ background: "rgba(255,255,255,0.08)", border: "none", borderRadius: 50, width: 32, height: 32, fontSize: 15, color: "rgba(255,255,255,0.6)", cursor: "pointer" }}>✕</button>
+        </div>
+        <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+          {listLoading ? (
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", textAlign: "center", padding: 20 }}>Loading...</div>
+          ) : listProfiles.length === 0 ? (
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", textAlign: "center", padding: 20 }}>Nobody here yet.</div>
+          ) : listProfiles.map(p => {
+            const photo = avatarUrl(p.photos?.[0] ?? p.avatar_url);
+            return (
+              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "6px 4px" }}>
+                <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#1a1a1a", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : <span style={{ fontSize: 20 }}>🙂</span>}
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>{p.name}</div>
+                  {p.location && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>📍 {p.location}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 
   // ── Edit mode ────────────────────────────────────────────────────────────────
   if (editing && draft) return (
@@ -167,6 +265,8 @@ export default function ProfilePage() {
   return (
     <main style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui", display: "flex", flexDirection: "column", color: "#fff" }}>
 
+      {ListModal}
+
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "52px 20px 16px" }}>
         <h1 style={{ fontSize: 24, fontWeight: 900, letterSpacing: "-0.03em" }}>My profile</h1>
         <div style={{ display: "flex", gap: 8 }}>
@@ -178,7 +278,7 @@ export default function ProfilePage() {
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 20 }}>
 
         {/* Profile header */}
-        <div style={{ padding: "0 20px 24px", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+        <div style={{ padding: "0 20px 8px", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
           <div style={{ position: "relative" }}>
             <div style={{ width: 100, height: 100, borderRadius: "50%", background: "#1a1a1a", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", border: "3px solid #D4AF37" }}>
               {mainPic ? <img src={mainPic} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt={profile.name} /> : <span style={{ fontSize: 52 }}>🙂</span>}
@@ -192,13 +292,14 @@ export default function ProfilePage() {
           {profile.bio && <p style={{ fontSize: 14, color: "rgba(255,255,255,0.65)", lineHeight: 1.65, textAlign: "center", maxWidth: 320 }}>{profile.bio}</p>}
           {profile.interests?.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-              {/* ✅ Fixed: explicit types on tag and i */}
               {(profile.interests as string[]).map((tag: string, i: number) => (
                 <div key={i} style={{ display: "inline-flex", alignItems: "center", background: "rgba(212,175,55,0.12)", border: "1px solid rgba(212,175,55,0.25)", color: "#D4AF37", borderRadius: 50, padding: "5px 13px", fontSize: 12, fontWeight: 600 }}>{tag}</div>
               ))}
             </div>
           )}
         </div>
+
+        {StatsRow}
 
         {/* Tabs */}
         <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "0 20px" }}>
@@ -210,7 +311,6 @@ export default function ProfilePage() {
         {/* Photos tab */}
         {activeTab === "photos" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, padding: "16px 20px" }}>
-            {/* ✅ Fixed: explicit types on path and i */}
             {(photos as string[]).map((path: string, i: number) => {
               const url = avatarUrl(path);
               return (

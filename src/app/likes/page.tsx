@@ -126,11 +126,14 @@ export default function LikesPage() {
   };
 
   if (authLoading || fetching) return (
-    <div style={{ minHeight: "100dvh", background: "#0a0a0a", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ textAlign: "center", color: "rgba(255,255,255,0.4)", fontFamily: "system-ui" }}>
-        <div style={{ fontSize: 36, marginBottom: 16 }}>💛</div>
-        <div style={{ fontSize: 14 }}>Loading likes...</div>
+    <div style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ textAlign: "center", color: "rgba(255,255,255,0.4)" }}>
+          <div style={{ fontSize: 36, marginBottom: 16 }}>💛</div>
+          <div style={{ fontSize: 14 }}>Loading likes...</div>
+        </div>
       </div>
+      <BottomNav />
     </div>
   );
 
