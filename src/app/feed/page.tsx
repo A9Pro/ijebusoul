@@ -3,7 +3,9 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, avatarUrl, postMediaUrl } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
+import { useTheme, type Theme } from "@/context/ThemeContext";
 import BottomNav from "@/components/BottomNav";
+import Header from "@/components/Header";
 import type { Post } from "@/lib/types";
 
 interface CommentItem {
@@ -17,16 +19,16 @@ interface CommentItem {
 
 const BG_COLORS = ["#1a1a2e", "#2e1a1a", "#1a2e1e", "#2e2a1a", "#241a2e", "#1a2830", "#000000", "#3a2a1a"];
 
-// ── Post creation / edit modal ────────────────────────────────────────────────
 interface CreatePostModalProps {
   userId: string;
   editingPost?: Post | null;
   onClose: () => void;
   onCreated: (post: Post) => void;
   onUpdated: (post: Post) => void;
+  colors: ReturnType<typeof useTheme>["colors"];
 }
 
-const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated }: CreatePostModalProps) => {
+const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated, colors }: CreatePostModalProps) => {
   const fileRef                   = useRef<HTMLInputElement>(null);
   const isEditing                 = !!editingPost;
   const [caption, setCaption]     = useState(editingPost?.caption ?? "");
@@ -65,7 +67,6 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated }:
     setError("");
 
     try {
-      // ── Editing an existing post ──────────────────────────────────────────
       if (isEditing && editingPost) {
         let mediaPath: string | null = editingPost.media_url ?? null;
         const oldPath = editingPost.media_url;
@@ -94,7 +95,6 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated }:
 
         if (updateErr) throw updateErr;
 
-        // best-effort cleanup of the old storage object when replaced or removed
         if (oldPath && (file || removeExistingPhoto)) {
           await supabase.storage.from("posts").remove([oldPath]).catch(() => {});
         }
@@ -104,7 +104,6 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated }:
         return;
       }
 
-      // ── Creating a new post ───────────────────────────────────────────────
       let mediaPath: string | null = null;
 
       if (file) {
@@ -142,24 +141,21 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated }:
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div style={{ width: "100%", maxWidth: 430, background: "#111", borderRadius: "24px 24px 0 0", padding: "24px 20px 48px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ width: "100%", maxWidth: 430, background: colors.card, borderRadius: "24px 24px 0 0", padding: "24px 20px 48px", display: "flex", flexDirection: "column", gap: 16 }}>
 
-        {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <h2 style={{ fontSize: 18, fontWeight: 900, color: "#fff" }}>{isEditing ? "Edit post" : "New post"}</h2>
-          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.08)", border: "none", borderRadius: 50, width: 34, height: 34, fontSize: 16, color: "rgba(255,255,255,0.6)", cursor: "pointer" }}>✕</button>
+          <h2 style={{ fontSize: 18, fontWeight: 900, color: colors.text }}>{isEditing ? "Edit post" : "New post"}</h2>
+          <button onClick={onClose} style={{ background: colors.bg, border: "none", borderRadius: 50, width: 34, height: 34, fontSize: 16, color: colors.subtext, cursor: "pointer" }}>✕</button>
         </div>
 
-        {/* Type toggle */}
         <div style={{ display: "flex", gap: 8 }}>
           {(["text", "photo"] as const).map(t => (
-            <button key={t} onClick={() => setPostType(t)} style={{ flex: 1, background: postType === t ? "#D4AF37" : "rgba(255,255,255,0.07)", border: "none", borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 700, color: postType === t ? "#000" : "rgba(255,255,255,0.5)", cursor: "pointer" }}>
+            <button key={t} onClick={() => setPostType(t)} style={{ flex: 1, background: postType === t ? "#D4AF37" : colors.bg, border: "none", borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 700, color: postType === t ? "#000" : colors.subtext, cursor: "pointer" }}>
               {t === "text" ? "✍️ Text" : "📷 Photo"}
             </button>
           ))}
         </div>
 
-        {/* Text background preview + color swatches */}
         {postType === "text" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ background: bgColor, borderRadius: 16, padding: "20px 18px", minHeight: 90, display: "flex", alignItems: "center", transition: "background 0.15s" }}>
@@ -175,7 +171,7 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated }:
                   aria-label={`Background ${c}`}
                   style={{
                     width: 30, height: 30, borderRadius: "50%", background: c, cursor: "pointer",
-                    border: bgColor === c ? "2px solid #D4AF37" : "2px solid rgba(255,255,255,0.15)",
+                    border: bgColor === c ? "2px solid #D4AF37" : `2px solid ${colors.border}`,
                     boxShadow: bgColor === c ? "0 0 0 2px rgba(212,175,55,0.3)" : "none",
                   }}
                 />
@@ -184,13 +180,12 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated }:
           </div>
         )}
 
-        {/* Photo picker */}
         {postType === "photo" && (
           <div style={{ position: "relative" }}>
-            <div onClick={() => fileRef.current?.click()} style={{ borderRadius: 16, background: preview ? "transparent" : "rgba(255,255,255,0.05)", border: `2px dashed ${preview ? "transparent" : "rgba(255,255,255,0.15)"}`, height: 180, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", overflow: "hidden" }}>
+            <div onClick={() => fileRef.current?.click()} style={{ borderRadius: 16, background: preview ? "transparent" : colors.bg, border: `2px dashed ${preview ? "transparent" : colors.border}`, height: 180, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", overflow: "hidden" }}>
               {preview
                 ? <img src={preview} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
-                : <div style={{ textAlign: "center", color: "rgba(255,255,255,0.3)" }}><div style={{ fontSize: 36, marginBottom: 8 }}>📷</div><div style={{ fontSize: 13 }}>Tap to choose photo</div></div>
+                : <div style={{ textAlign: "center", color: colors.subtext }}><div style={{ fontSize: 36, marginBottom: 8 }}>📷</div><div style={{ fontSize: 13 }}>Tap to choose photo</div></div>
               }
             </div>
             {preview && (
@@ -203,16 +198,15 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated }:
         )}
         <input ref={fileRef} type="file" accept="image/*,video/*" onChange={handleFile} style={{ display: "none" }} />
 
-        {/* Caption */}
         <textarea
           value={caption}
           onChange={e => setCaption(e.target.value)}
           placeholder={postType === "text" ? "What's on your mind? 🌍" : "Add a caption..."}
           maxLength={300}
           rows={postType === "text" ? 5 : 3}
-          style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, padding: "14px 16px", fontSize: 15, color: "#fff", outline: "none", resize: "none", lineHeight: 1.6, fontFamily: "system-ui" }}
+          style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 14, padding: "14px 16px", fontSize: 15, color: colors.text, outline: "none", resize: "none", lineHeight: 1.6, fontFamily: "system-ui" }}
         />
-        <div style={{ textAlign: "right", fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: -10 }}>{caption.length}/300</div>
+        <div style={{ textAlign: "right", fontSize: 11, color: colors.subtext, marginTop: -10 }}>{caption.length}/300</div>
 
         {error && <div style={{ background: "rgba(255,51,102,0.15)", border: "1px solid rgba(255,51,102,0.3)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#FF3366" }}>{error}</div>}
 
@@ -224,10 +218,10 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated }:
   );
 };
 
-// ── Feed page ─────────────────────────────────────────────────────────────────
 export default function FeedPage() {
   const router = useRouter();
   const { user, profile: myProfile, loading: authLoading } = useAuth();
+  const { colors } = useTheme();
 
   const [posts, setPosts]                   = useState<Post[]>([]);
   const [fetching, setFetching]             = useState(true);
@@ -253,7 +247,6 @@ export default function FeedPage() {
     if (!authLoading && !user) router.replace("/");
   }, [authLoading, user]);
 
-  // close the ⋯ menu on outside click
   useEffect(() => {
     if (!menuOpenFor) return;
     const handleClickOutside = (e: MouseEvent) => {
@@ -302,7 +295,6 @@ export default function FeedPage() {
     })();
   }, [user]);
 
-  // ── Likes (DB triggers now persist likes_count automatically) ────────────────
   const toggleLike = async (post: Post) => {
     if (!user) return;
     if (post.user_liked) {
@@ -325,7 +317,6 @@ export default function FeedPage() {
     }
   };
 
-  // ── Save / bookmark ───────────────────────────────────────────────────────
   const toggleSave = async (post: Post) => {
     if (!user) return;
     if (post.user_saved) {
@@ -337,12 +328,11 @@ export default function FeedPage() {
     }
   };
 
-  // ── Comments ───────────────────────────────────────────────────────────────
   const openComments = async (postId: string) => {
     if (commenting === postId) { setCommenting(null); return; }
     setCommenting(postId);
     setCommentDraft("");
-    if (commentsByPost[postId]) return; // already fetched
+    if (commentsByPost[postId]) return;
 
     setCommentsLoading(postId);
     const { data } = await supabase
@@ -370,7 +360,6 @@ export default function FeedPage() {
     setCommentDraft("");
   };
 
-  // ── Share ──────────────────────────────────────────────────────────────────
   const sharePost = async (post: Post) => {
     const url = `${window.location.origin}/feed?post=${post.id}`;
     const text = post.caption || "Check this out on ìjèbúsoul";
@@ -386,7 +375,6 @@ export default function FeedPage() {
     }
   };
 
-  // ── Edit / Delete ─────────────────────────────────────────────────────────
   const startEdit = (post: Post) => {
     setMenuOpenFor(null);
     setEditingPost(post);
@@ -415,11 +403,11 @@ export default function FeedPage() {
     return `${Math.floor(mins / 1440)}d ago`;
   };
 
-  // ── Loading (BottomNav now always renders, even here) ─────────────────────
   if (authLoading || fetching) return (
-    <div style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
+    <div style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: colors.bg, fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
+      <Header />
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ textAlign: "center", color: "rgba(255,255,255,0.4)" }}>
+        <div style={{ textAlign: "center", color: colors.subtext }}>
           <div style={{ fontSize: 36, marginBottom: 16 }}>▶️</div>
           <div style={{ fontSize: 14 }}>Loading feed...</div>
         </div>
@@ -429,16 +417,14 @@ export default function FeedPage() {
   );
 
   return (
-    <main style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui", display: "flex", flexDirection: "column", position: "relative" }}>
+    <main style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: colors.bg, fontFamily: "system-ui", display: "flex", flexDirection: "column", position: "relative" }}>
 
-      {/* ── Toast ── */}
       {toast && (
         <div style={{ position: "fixed", top: 20, left: "50%", transform: "translateX(-50%)", background: toast.color, color: "#fff", fontSize: 13, fontWeight: 700, padding: "10px 20px", borderRadius: 50, zIndex: 200, whiteSpace: "nowrap" }}>
           {toast.label}
         </div>
       )}
 
-      {/* ── Create / Edit modal ── */}
       {(showCreate || editingPost) && user && myProfile && (
         <CreatePostModal
           userId={user.id}
@@ -446,19 +432,20 @@ export default function FeedPage() {
           onClose={() => { setShowCreate(false); setEditingPost(null); }}
           onCreated={post => setPosts(ps => [post, ...ps])}
           onUpdated={updated => setPosts(ps => ps.map(p => p.id === updated.id ? { ...p, ...updated } : p))}
+          colors={colors}
         />
       )}
 
-      {/* ── Header ── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "52px 20px 16px", background: "#0a0a0a", borderBottom: "1px solid rgba(255,255,255,0.06)", position: "sticky", top: 0, zIndex: 10 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 900, color: "#fff", letterSpacing: "-0.03em" }}>ìjèbú <span style={{ color: "#D4AF37" }}>feed</span></h1>
+      <Header />
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", background: colors.bg, borderBottom: `1px solid ${colors.border}`, position: "sticky", top: 0, zIndex: 10 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 900, color: colors.text, letterSpacing: "-0.03em" }}>ìjèbú <span style={{ color: "#D4AF37" }}>feed</span></h1>
         <button onClick={() => setShowCreate(true)} style={{ background: "#D4AF37", border: "none", borderRadius: 50, padding: "8px 18px", fontSize: 13, fontWeight: 700, color: "#000", cursor: "pointer" }}>+ Post</button>
       </div>
 
-      {/* ── Posts ── */}
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 20 }}>
         {posts.length === 0 ? (
-          <div style={{ textAlign: "center", color: "rgba(255,255,255,0.25)", fontSize: 14, paddingTop: 80 }}>
+          <div style={{ textAlign: "center", color: colors.subtext, fontSize: 14, paddingTop: 80 }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>📭</div>
             No posts yet. Be the first to share!
             <br />
@@ -471,32 +458,31 @@ export default function FeedPage() {
           const comments = commentsByPost[post.id] ?? [];
 
           return (
-            <div key={post.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: 4, marginBottom: 4, position: "relative" }}>
+            <div key={post.id} style={{ borderBottom: `1px solid ${colors.border}`, paddingBottom: 4, marginBottom: 4, position: "relative" }}>
 
-              {/* Author row */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px 10px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#1a1a1a", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ width: 44, height: 44, borderRadius: "50%", background: colors.card, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
                     {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : <span style={{ fontSize: 22 }}>🙂</span>}
                   </div>
                   <div>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: "#fff" }}>{post.profile?.name}</div>
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>📍 {post.profile?.location} · {timeAgo(post.created_at)}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: colors.text }}>{post.profile?.name}</div>
+                    <div style={{ fontSize: 12, color: colors.subtext }}>📍 {post.profile?.location} · {timeAgo(post.created_at)}</div>
                   </div>
                 </div>
 
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   {!isOwner && (
-                    <button onClick={() => toggleFollow(post)} style={{ background: post.user_following ? "rgba(255,255,255,0.08)" : "#D4AF37", border: post.user_following ? "1px solid rgba(255,255,255,0.15)" : "none", borderRadius: 50, padding: "6px 16px", fontSize: 12, fontWeight: 700, color: post.user_following ? "rgba(255,255,255,0.6)" : "#000", cursor: "pointer" }}>
+                    <button onClick={() => toggleFollow(post)} style={{ background: post.user_following ? colors.card : "#D4AF37", border: post.user_following ? `1px solid ${colors.border}` : "none", borderRadius: 50, padding: "6px 16px", fontSize: 12, fontWeight: 700, color: post.user_following ? colors.subtext : "#000", cursor: "pointer" }}>
                       {post.user_following ? "Following" : "Follow"}
                     </button>
                   )}
                   {isOwner && (
                     <div style={{ position: "relative" }} ref={menuOpenFor === post.id ? menuRef : undefined}>
-                      <button onClick={() => setMenuOpenFor(menuOpenFor === post.id ? null : post.id)} style={{ background: "none", border: "none", fontSize: 18, color: "rgba(255,255,255,0.5)", cursor: "pointer", padding: 4 }}>⋯</button>
+                      <button onClick={() => setMenuOpenFor(menuOpenFor === post.id ? null : post.id)} style={{ background: "none", border: "none", fontSize: 18, color: colors.subtext, cursor: "pointer", padding: 4 }}>⋯</button>
                       {menuOpenFor === post.id && (
-                        <div style={{ position: "absolute", top: 28, right: 0, background: "#1a1a1a", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, overflow: "hidden", zIndex: 20, minWidth: 120 }}>
-                          <button onClick={() => startEdit(post)} style={{ width: "100%", textAlign: "left", background: "none", border: "none", padding: "10px 14px", fontSize: 13, color: "#fff", cursor: "pointer" }}>✏️ Edit</button>
+                        <div style={{ position: "absolute", top: 28, right: 0, background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 12, overflow: "hidden", zIndex: 20, minWidth: 120 }}>
+                          <button onClick={() => startEdit(post)} style={{ width: "100%", textAlign: "left", background: "none", border: "none", padding: "10px 14px", fontSize: 13, color: colors.text, cursor: "pointer" }}>✏️ Edit</button>
                           <button onClick={() => deletePost(post)} style={{ width: "100%", textAlign: "left", background: "none", border: "none", padding: "10px 14px", fontSize: 13, color: "#FF3366", cursor: "pointer" }}>🗑️ Delete</button>
                         </div>
                       )}
@@ -505,40 +491,38 @@ export default function FeedPage() {
                 </div>
               </div>
 
-              {/* Content */}
               {post.type === "text" ? (
                 <div style={{ margin: "0 16px 12px", background: post.bg_color || "#1a1a2e", borderRadius: 18, padding: "24px 20px", minHeight: 120, display: "flex", alignItems: "center" }}>
                   <p style={{ fontSize: 16, color: "#fff", lineHeight: 1.6, fontWeight: 500, fontStyle: "italic" }}>"{post.caption}"</p>
                 </div>
               ) : media ? (
-                <div style={{ margin: "0 16px 12px", borderRadius: 18, overflow: "hidden", height: 280, background: "#111" }}>
+                <div style={{ margin: "0 16px 12px", borderRadius: 18, overflow: "hidden", height: 280, background: colors.card }}>
                   {post.type === "video"
                     ? <video src={media} style={{ width: "100%", height: "100%", objectFit: "cover" }} controls />
                     : <img src={media} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
                   }
                 </div>
               ) : (
-                <div style={{ margin: "0 16px 12px", borderRadius: 18, background: "#1a1a1a", height: 200, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ margin: "0 16px 12px", borderRadius: 18, background: colors.card, height: 200, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <span style={{ fontSize: 64 }}>📷</span>
                 </div>
               )}
 
               {post.type !== "text" && post.caption && (
-                <p style={{ padding: "0 16px 10px", fontSize: 14, color: "rgba(255,255,255,0.8)", lineHeight: 1.55 }}>
-                  <span style={{ fontWeight: 700, color: "#fff" }}>{post.profile?.name} </span>{post.caption}
+                <p style={{ padding: "0 16px 10px", fontSize: 14, color: colors.subtext, lineHeight: 1.55 }}>
+                  <span style={{ fontWeight: 700, color: colors.text }}>{post.profile?.name} </span>{post.caption}
                 </p>
               )}
 
-              {/* Actions */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 16px 14px" }}>
                 <div style={{ display: "flex", gap: 20 }}>
                   <button onClick={() => toggleLike(post)} style={{ background: "none", border: "none", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
                     <span style={{ fontSize: 20 }}>{post.user_liked ? "❤️" : "🤍"}</span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: post.user_liked ? "#FF3366" : "rgba(255,255,255,0.4)" }}>{post.likes_count.toLocaleString()}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: post.user_liked ? "#FF3366" : colors.subtext }}>{post.likes_count.toLocaleString()}</span>
                   </button>
                   <button onClick={() => openComments(post.id)} style={{ background: "none", border: "none", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
                     <span style={{ fontSize: 20 }}>💬</span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.4)" }}>{post.comments_count.toLocaleString()}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: colors.subtext }}>{post.comments_count.toLocaleString()}</span>
                   </button>
                   <button onClick={() => sharePost(post)} style={{ background: "none", border: "none", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
                     <span style={{ fontSize: 20 }}>↗️</span>
@@ -557,42 +541,39 @@ export default function FeedPage() {
                 >📌</button>
               </div>
 
-              {/* Comments panel */}
               {commenting === post.id && (
                 <div style={{ padding: "0 16px 16px" }}>
 
-                  {/* Existing comments */}
                   {commentsLoading === post.id ? (
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", padding: "8px 0" }}>Loading comments...</div>
+                    <div style={{ fontSize: 12, color: colors.subtext, padding: "8px 0" }}>Loading comments...</div>
                   ) : comments.length > 0 ? (
                     <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
                       {comments.map(c => {
                         const cPhoto = avatarUrl(c.profile?.photos?.[0] ?? c.profile?.avatar_url);
                         return (
                           <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                            <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#1a1a1a", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            <div style={{ width: 28, height: 28, borderRadius: "50%", background: colors.card, overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
                               {cPhoto ? <img src={cPhoto} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : <span style={{ fontSize: 13 }}>🙂</span>}
                             </div>
-                            <div style={{ background: "rgba(255,255,255,0.06)", borderRadius: 14, padding: "8px 12px", flex: 1 }}>
-                              <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{c.profile?.name ?? "Someone"} </span>
-                              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.75)" }}>{c.content}</span>
+                            <div style={{ background: colors.card, borderRadius: 14, padding: "8px 12px", flex: 1 }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: colors.text }}>{c.profile?.name ?? "Someone"} </span>
+                              <span style={{ fontSize: 12, color: colors.subtext }}>{c.content}</span>
                             </div>
                           </div>
                         );
                       })}
                     </div>
                   ) : (
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", padding: "4px 0 12px" }}>No comments yet — be the first.</div>
+                    <div style={{ fontSize: 12, color: colors.subtext, padding: "4px 0 12px" }}>No comments yet — be the first.</div>
                   )}
 
-                  {/* Comment input */}
                   <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                     <input
                       value={commentDraft}
                       onChange={e => setCommentDraft(e.target.value)}
                       onKeyDown={e => { if (e.key === "Enter") submitComment(post); }}
                       placeholder="Add a comment..."
-                      style={{ flex: 1, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 50, padding: "11px 16px", fontSize: 13, color: "#fff", outline: "none", fontFamily: "system-ui" }}
+                      style={{ flex: 1, background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 50, padding: "11px 16px", fontSize: 13, color: colors.text, outline: "none", fontFamily: "system-ui" }}
                     />
                     <button
                       onClick={() => submitComment(post)}
