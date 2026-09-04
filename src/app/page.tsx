@@ -1,8 +1,31 @@
 "use client";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+
+const EARLY_GROWTH_THRESHOLD = 50; // below this, show "be one of the first" instead of a count
 
 export default function Home() {
   const router = useRouter();
+  const [userCount, setUserCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.rpc("get_profile_count");
+      if (typeof data === "number") setUserCount(data);
+    })();
+  }, []);
+
+  const formattedCount = userCount !== null && userCount >= 1000
+    ? `${(Math.floor(userCount / 100) / 10).toFixed(1)}k+`
+    : `${userCount ?? 0}+`;
+
+  const isEarlyGrowth = userCount !== null && userCount < EARLY_GROWTH_THRESHOLD;
+  const socialProofText = userCount === null
+    ? null // still loading — don't show anything rather than a fake number
+    : isEarlyGrowth
+      ? "New here — be one of the first"
+      : `${formattedCount} locals already matched`;
 
   return (
     <main style={{
@@ -78,7 +101,7 @@ export default function Home() {
         </p>
 
         {/* Social proof */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 28 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 28, minHeight: 34 }}>
           <div style={{ display: "flex" }}>
             {["👩🏾", "👨🏿", "👩🏿", "🧑🏾"].map((em, i) => (
               <div key={i} style={{
@@ -91,9 +114,11 @@ export default function Home() {
               }}>{em}</div>
             ))}
           </div>
-          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", fontWeight: 500 }}>
-            2,400+ locals already matched
-          </p>
+          {socialProofText && (
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", fontWeight: 500 }}>
+              {socialProofText}
+            </p>
+          )}
         </div>
 
         {/* CTA Buttons */}
