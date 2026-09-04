@@ -1,16 +1,29 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, avatarUrl } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import BottomNav from "@/components/BottomNav";
-import type { Profile } from "@/lib/types";
+import type { Profile, Notification } from "@/lib/types";
 
 const BADGE: Record<string, { bg: string; color: string; emoji: string }> = {
   relationship: { bg: "rgba(255,51,102,0.25)",  color: "#FF3366", emoji: "💍" },
   casual:       { bg: "rgba(96,165,250,0.25)",   color: "#60A5FA", emoji: "🌊" },
   friendship:   { bg: "rgba(212,175,55,0.25)",   color: "#D4AF37", emoji: "☕" },
   fwb:          { bg: "rgba(52,211,153,0.25)",   color: "#34D399", emoji: "🤙🏾" },
+};
+
+const NOTIF_COPY: Record<string, (name: string) => string> = {
+  post_like:    (n) => `${n} liked your post`,
+  post_comment: (n) => `${n} commented on your post`,
+  swipe_like:   (n) => `${n} liked your profile`,
+  match:        (n) => `You and ${n} matched! 🎉`,
+  message:      (n) => `${n} sent you a message`,
+  follow:       (n) => `${n} started following you`,
+};
+
+const NOTIF_ICON: Record<string, string> = {
+  post_like: "❤️", post_comment: "💬", swipe_like: "💛", match: "🎉", message: "✉️", follow: "➕",
 };
 
 type Toast = { label: string; color: string } | null;
@@ -24,7 +37,9 @@ export default function HomePage() {
   const [toast, setToast]       = useState<Toast>(null);
   const [fetching, setFetching] = useState(true);
 
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [notifications, setNotifications]         = useState<Notification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const notifRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/");
@@ -48,19 +63,31 @@ export default function HomePage() {
     })();
   }, [user]);
 
-  // ── Notifications: unread count ─────────────────────────────────────────
+  // ── Notifications: initial fetch ──────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
     (async () => {
-      const { count } = await supabase
+      const { data: raw } = await supabase
         .from("notifications")
-        .select("id", { count: "exact", head: true })
+        .select("*")
         .eq("user_id", user.id)
-        .eq("read", false);
-      setUnreadCount(count ?? 0);
+        .order("created_at", { ascending: false })
+        .limit(30);
+
+      if (!raw?.length) { setNotifications([]); return; }
+
+      const actorIds = Array.from(new Set(raw.map(n => n.actor_id).filter(Boolean))) as string[];
+      const { data: profs } = actorIds.length
+        ? await supabase.from("profiles").select("*").in("id", actorIds)
+        : { data: [] as Profile[] };
+      const profMap: Record<string, Profile> = {};
+      profs?.forEach(p => { profMap[p.id] = p as Profile; });
+
+      setNotifications(raw.map(n => ({ ...n, actor: n.actor_id ? profMap[n.actor_id] : undefined })) as Notification[]);
     })();
   }, [user]);
 
+  // ── Notifications: realtime ────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
     const channel = supabase
@@ -68,10 +95,62 @@ export default function HomePage() {
       .on("postgres_changes", {
         event: "INSERT", schema: "public", table: "notifications",
         filter: `user_id=eq.${user.id}`,
-      }, () => setUnreadCount(c => c + 1))
+      }, async payload => {
+        const n = payload.new as Notification;
+        let actor: Profile | undefined;
+        if (n.actor_id) {
+          const { data } = await supabase.from("profiles").select("*").eq("id", n.actor_id).single();
+          actor = data as Profile;
+        }
+        setNotifications(prev => [{ ...n, actor }, ...prev]);
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [user]);
+
+  // ── Notifications: close panel on outside click ────────────────────────────
+  useEffect(() => {
+    if (!showNotifications) return;
+    const handler = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setShowNotifications(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showNotifications]);
+
+  const unreadCount = notifications.filter(n => !n.read).length;
+
+  const toggleNotifications = async () => {
+    const opening = !showNotifications;
+    setShowNotifications(opening);
+    if (opening && user && unreadCount > 0) {
+      await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false);
+      setNotifications(ns => ns.map(n => ({ ...n, read: true })));
+    }
+  };
+
+  const goToActor = (id?: string | null) => {
+    if (!id) return;
+    setShowNotifications(false);
+    router.push(`/profile/${id}`);
+  };
+
+  const handleNotifClick = (n: Notification) => {
+    setShowNotifications(false);
+    if (n.type === "post_like" || n.type === "post_comment") router.push("/feed");
+    else if (n.type === "swipe_like") router.push("/likes");
+    else if (n.type === "match" || n.type === "message") router.push("/chats");
+    else if (n.type === "follow") goToActor(n.actor_id);
+  };
+
+  const notifTimeAgo = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1)    return "now";
+    if (mins < 60)   return `${mins}m`;
+    if (mins < 1440) return `${Math.floor(mins / 60)}h`;
+    return `${Math.floor(mins / 1440)}d`;
+  };
 
   const showToast = (label: string, color: string) => {
     setToast({ label, color });
@@ -124,11 +203,37 @@ export default function HomePage() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "52px 20px 12px", background: "#0a0a0a", zIndex: 10 }}>
         <span style={{ fontSize: 22, fontWeight: 900, color: "#fff", letterSpacing: "-0.03em" }}>ìjèbú<span style={{ color: "#D4AF37" }}>soul</span></span>
         <div style={{ display: "flex", gap: 10 }}>
-          <div style={{ position: "relative" }}>
-            <button onClick={() => router.push("/notifications")} style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, cursor: "pointer" }}>🔔</button>
+          <div style={{ position: "relative" }} ref={notifRef}>
+            <button onClick={toggleNotifications} style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, cursor: "pointer" }}>🔔</button>
             {unreadCount > 0 && (
               <div style={{ position: "absolute", top: -2, right: -2, minWidth: 16, height: 16, borderRadius: 50, background: "#FF3366", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, color: "#fff", padding: "0 3px" }}>
                 {unreadCount > 9 ? "9+" : unreadCount}
+              </div>
+            )}
+            {showNotifications && (
+              <div style={{ position: "absolute", top: 44, right: 0, width: 300, maxHeight: 400, overflowY: "auto", background: "#151515", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, zIndex: 60, boxShadow: "0 12px 30px rgba(0,0,0,0.5)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "#fff" }}>Notifications</span>
+                  <button onClick={() => { setShowNotifications(false); router.push("/notifications/settings"); }} style={{ background: "none", border: "none", fontSize: 14, cursor: "pointer" }}>⚙️</button>
+                </div>
+                {notifications.length === 0 ? (
+                  <div style={{ padding: 20, textAlign: "center", fontSize: 13, color: "rgba(255,255,255,0.3)" }}>No notifications yet</div>
+                ) : notifications.map(n => {
+                  const actorPhoto = n.actor ? avatarUrl(n.actor.photos?.[0] ?? n.actor.avatar_url) : null;
+                  return (
+                    <div key={n.id} onClick={() => handleNotifClick(n)} style={{ display: "flex", gap: 10, alignItems: "center", padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.05)", background: n.read ? "transparent" : "rgba(212,175,55,0.06)", cursor: "pointer" }}>
+                      <div onClick={e => { e.stopPropagation(); goToActor(n.actor_id); }} style={{ width: 34, height: 34, borderRadius: "50%", background: "#1a1a1a", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                        {actorPhoto ? <img src={actorPhoto} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : <span style={{ fontSize: 16 }}>🙂</span>}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12.5, color: "#fff", lineHeight: 1.4 }}>
+                          {NOTIF_ICON[n.type]} {(NOTIF_COPY[n.type] ?? (() => "New notification"))(n.actor?.name ?? "Someone")}
+                        </div>
+                        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>{notifTimeAgo(n.created_at)} ago</div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -140,7 +245,6 @@ export default function HomePage() {
         <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", fontWeight: 500 }}>{profiles.length - index} profiles near you</span>
       </div>
 
-      {/* ── flex:1 content — bottom padding reserves space for the fixed BottomNav ── */}
       <div style={{ flex: 1, padding: "0 14px 100px", display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ position: "relative", borderRadius: 28, overflow: "hidden", background: "#1a1a1a", flex: 1, minHeight: 460 }}>
 
