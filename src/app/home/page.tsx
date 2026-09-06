@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, avatarUrl } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
+import { useTheme } from "@/context/ThemeContext";
 import BottomNav from "@/components/BottomNav";
 import Header from "@/components/Header";
 import type { Profile } from "@/lib/types";
@@ -19,6 +20,7 @@ type Toast = { label: string; color: string } | null;
 export default function HomePage() {
   const router = useRouter();
   const { user, profile: myProfile, loading: authLoading } = useAuth();
+  const { colors } = useTheme();
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [index, setIndex]       = useState(0);
@@ -32,8 +34,6 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!user) {
-      // No user (logged out, or session still resolving) — stop spinning.
-      // The redirect effect above sends us to "/" once authLoading settles.
       setFetching(false);
       setProfiles([]);
       return;
@@ -70,10 +70,10 @@ export default function HomePage() {
   };
 
   if (authLoading || fetching) return (
-    <div style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
+    <div style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: colors.bg, fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
       <Header />
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ textAlign: "center", color: "rgba(255,255,255,0.4)" }}>
+        <div style={{ textAlign: "center", color: colors.subtext }}>
           <div style={{ fontSize: 36, marginBottom: 16 }}>✨</div>
           <div style={{ fontSize: 14 }}>Finding people near you...</div>
         </div>
@@ -85,13 +85,13 @@ export default function HomePage() {
   const current = profiles[index];
 
   if (!current) return (
-    <main style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui", display: "flex", flexDirection: "column", color: "#fff" }}>
+    <main style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: colors.bg, fontFamily: "system-ui", display: "flex", flexDirection: "column", color: colors.text }}>
       <Header />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: "0 32px" }}>
         <div style={{ fontSize: 64 }}>👀</div>
-        <h2 style={{ fontSize: 22, fontWeight: 900, textAlign: "center", letterSpacing: "-0.02em" }}>You've seen everyone nearby</h2>
-        <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", textAlign: "center" }}>Check back soon — new people join daily.</p>
-        <button onClick={() => setIndex(0)} style={{ background: "#D4AF37", border: "none", borderRadius: 50, padding: "12px 28px", fontSize: 14, fontWeight: 700, color: "#000", cursor: "pointer", marginTop: 8 }}>Refresh</button>
+        <h2 style={{ fontSize: 22, fontWeight: 900, textAlign: "center", letterSpacing: "-0.02em", color: colors.text }}>You've seen everyone nearby</h2>
+        <p style={{ fontSize: 14, color: colors.subtext, textAlign: "center" }}>Check back soon — new people join daily.</p>
+        <button onClick={() => setIndex(0)} style={{ background: colors.accent, border: "none", borderRadius: 50, padding: "12px 28px", fontSize: 14, fontWeight: 700, color: "#000", cursor: "pointer", marginTop: 8 }}>Refresh</button>
       </div>
       <BottomNav />
     </main>
@@ -101,16 +101,16 @@ export default function HomePage() {
   const photoSrc = avatarUrl(current.photos?.[0] ?? current.avatar_url);
 
   return (
-    <main style={{ minHeight: "100dvh", width: "100%", maxWidth: 430, margin: "0 auto", background: "#0a0a0a", fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
+    <main style={{ minHeight: "100dvh", width: "100%", maxWidth: 430, margin: "0 auto", background: colors.bg, fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
 
       <Header />
 
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "12px 20px 12px" }}>
-        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", fontWeight: 500 }}>{profiles.length - index} profiles near you</span>
+        <span style={{ fontSize: 12, color: colors.subtext, fontWeight: 500 }}>{profiles.length - index} profiles near you</span>
       </div>
 
       <div style={{ flex: 1, padding: "0 14px 100px", display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ position: "relative", borderRadius: 28, overflow: "hidden", background: "#1a1a1a", flex: 1, minHeight: 460 }}>
+        <div style={{ position: "relative", borderRadius: 28, overflow: "hidden", background: colors.card, flex: 1, minHeight: 460 }}>
 
           {photoSrc ? (
             <img src={photoSrc} alt={current.name} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
@@ -139,9 +139,9 @@ export default function HomePage() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, padding: "4px 0 8px" }}>
-          <button onClick={() => swipe("pass")}      style={{ width: 54, height: 54, borderRadius: "50%", background: "rgba(255,255,255,0.07)", border: "1.5px solid rgba(255,255,255,0.12)", fontSize: 22, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>👎</button>
+          <button onClick={() => swipe("pass")}      style={{ width: 54, height: 54, borderRadius: "50%", background: colors.card, border: `1.5px solid ${colors.border}`, fontSize: 22, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>👎</button>
           <button onClick={() => swipe("superlike")} style={{ width: 50, height: 50, borderRadius: "50%", background: "rgba(96,165,250,0.12)", border: "1.5px solid rgba(96,165,250,0.3)", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>⭐</button>
-          <button onClick={() => swipe("like")}      style={{ width: 68, height: 68, borderRadius: "50%", background: "#D4AF37", border: "none", fontSize: 26, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>❤️</button>
+          <button onClick={() => swipe("like")}      style={{ width: 68, height: 68, borderRadius: "50%", background: colors.accent, border: "none", fontSize: 26, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>❤️</button>
           <button onClick={advance}                  style={{ width: 50, height: 50, borderRadius: "50%", background: "rgba(167,139,250,0.12)", border: "1.5px solid rgba(167,139,250,0.3)", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>🔖</button>
           <button onClick={() => swipe("like")}      style={{ width: 54, height: 54, borderRadius: "50%", background: "rgba(255,51,102,0.1)", border: "1.5px solid rgba(255,51,102,0.25)", fontSize: 22, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>⚡</button>
         </div>
