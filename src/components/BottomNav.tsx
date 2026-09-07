@@ -1,5 +1,6 @@
 "use client";
 import { usePathname, useRouter } from "next/navigation";
+import { useTheme } from "@/context/ThemeContext";
 
 const NAV_ITEMS = [
   { id: "discover", path: "/home",    icon: "🔥", label: "Discover" },
@@ -12,14 +13,14 @@ const NAV_ITEMS = [
 export default function BottomNav() {
   const router   = useRouter();
   const pathname = usePathname();
+  const { colors } = useTheme();
 
   return (
     <div style={{
-      position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
-      width: "100%", maxWidth: 430, zIndex: 50,
+      width: "100%", flexShrink: 0,
       display: "flex", justifyContent: "space-around", alignItems: "center",
-      padding: "10px 0 30px", background: "#0a0a0a",
-      borderTop: "1px solid rgba(255,255,255,0.06)",
+      padding: "10px 0 30px", background: colors.bg,
+      borderTop: `1px solid ${colors.border}`,
     }}>
       {NAV_ITEMS.map((item) => {
         const active = pathname === item.path;
@@ -37,12 +38,12 @@ export default function BottomNav() {
             <span style={{ fontSize: 22 }}>{item.icon}</span>
             <span style={{
               fontSize: 10, fontWeight: 600, letterSpacing: "0.03em",
-              color: active ? "#D4AF37" : "rgba(255,255,255,0.3)",
+              color: active ? colors.accent : colors.subtext,
             }}>
               {item.label}
             </span>
             {active && (
-              <div style={{ width: 4, height: 4, borderRadius: "50%", background: "#D4AF37" }} />
+              <div style={{ width: 4, height: 4, borderRadius: "50%", background: colors.accent }} />
             )}
           </button>
         );

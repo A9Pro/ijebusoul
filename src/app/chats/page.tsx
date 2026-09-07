@@ -65,7 +65,7 @@ export default function ChatsPage() {
     })();
   }, [user]);
 
-  useEffect(() => {
+    useEffect(() => {
     if (!activeMatch || !user) return;
 
     (async () => {
@@ -73,9 +73,14 @@ export default function ChatsPage() {
         .from("messages").select("*").eq("match_id", activeMatch.id).order("created_at");
       setMessages((data as Message[]) ?? []);
 
-      await supabase.from("messages")
+      const { error: markErr } = await supabase.from("messages")
         .update({ read_at: new Date().toISOString() })
         .eq("match_id", activeMatch.id).neq("sender_id", user.id).is("read_at", null);
+
+      // reflect the read state locally — otherwise the list still shows the stale count on return
+      if (!markErr) {
+        setMatches(ms => ms.map(m => m.id === activeMatch.id ? { ...m, unread_count: 0 } : m));
+      }
     })();
 
     const channel = supabase
@@ -84,7 +89,12 @@ export default function ChatsPage() {
         event: "INSERT", schema: "public", table: "messages",
         filter: `match_id=eq.${activeMatch.id}`,
       }, payload => {
-        setMessages(prev => [...prev, payload.new as Message]);
+        const msg = payload.new as Message;
+        setMessages(prev => [...prev, msg]);
+        // conversation is already open — mark incoming messages read immediately, no lag
+        if (msg.sender_id !== user.id) {
+          supabase.from("messages").update({ read_at: new Date().toISOString() }).eq("id", msg.id);
+        }
       })
       .subscribe();
 
