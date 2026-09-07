@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
@@ -7,7 +7,7 @@ import { subscribeToPush, pushSupported } from "@/lib/push";
 
 const PROMPTED_KEY = "ijebu-push-prompted";
 
-export default function EnableNotificationsPage() {
+function EnableNotificationsInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") || "/home";
@@ -61,5 +61,13 @@ export default function EnableNotificationsPage() {
         </button>
       </div>
     </main>
+  );
+}
+
+export default function EnableNotificationsPage() {
+  return (
+    <Suspense fallback={null}>
+      <EnableNotificationsInner />
+    </Suspense>
   );
 }
