@@ -1,0 +1,65 @@
+"use client";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
+import { useTheme } from "@/context/ThemeContext";
+import { subscribeToPush, pushSupported } from "@/lib/push";
+
+const PROMPTED_KEY = "ijebu-push-prompted";
+
+export default function EnableNotificationsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const next = searchParams.get("next") || "/home";
+  const { user, loading: authLoading } = useAuth();
+  const { colors } = useTheme();
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) { router.replace(next); return; }
+    const alreadyPrompted = typeof window !== "undefined" && localStorage.getItem(PROMPTED_KEY);
+    const alreadyDecided  = typeof window !== "undefined" && "Notification" in window && Notification.permission !== "default";
+    if (!pushSupported() || alreadyPrompted || alreadyDecided) {
+      router.replace(next);
+    }
+  }, [authLoading, user]);
+
+  const finish = () => {
+    if (typeof window !== "undefined") localStorage.setItem(PROMPTED_KEY, "1");
+    router.replace(next);
+  };
+
+  const handleEnable = async () => {
+    if (!user || busy) return;
+    setBusy(true);
+    await subscribeToPush(user.id);
+    setBusy(false);
+    finish();
+  };
+
+  return (
+    <main style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: colors.bg, fontFamily: "system-ui", display: "flex", flexDirection: "column", color: colors.text }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20, padding: "0 28px", textAlign: "center" }}>
+        <div style={{ fontSize: 56 }}>🔔</div>
+        <h1 style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-0.02em" }}>Stay connected to your ìjèbú soul</h1>
+        <p style={{ fontSize: 14, color: colors.subtext, lineHeight: 1.6 }}>
+          Get notified when someone likes you, matches with you, sends you a message, or interacts with you.
+        </p>
+        <button
+          onClick={handleEnable}
+          disabled={busy}
+          style={{ width: "100%", background: colors.accent, border: "none", borderRadius: 14, padding: "16px 0", fontSize: 15, fontWeight: 800, color: "#000", cursor: busy ? "not-allowed" : "pointer" }}
+        >
+          {busy ? "Enabling..." : "Enable Notifications"}
+        </button>
+        <button
+          onClick={finish}
+          style={{ width: "100%", background: "none", border: "none", padding: "12px 0", fontSize: 14, fontWeight: 600, color: colors.subtext, cursor: "pointer" }}
+        >
+          Not now
+        </button>
+      </div>
+    </main>
+  );
+}

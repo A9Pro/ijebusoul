@@ -1,8 +1,20 @@
 "use client";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+
+const EARLY_THRESHOLD = 50; // below this, show "be one of the first" instead of a small raw number
 
 export default function Home() {
   const router = useRouter();
+  const [userCount, setUserCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase.rpc("get_user_count");
+      if (!error && typeof data === "number") setUserCount(data);
+    })();
+  }, []);
 
   return (
     <main style={{
@@ -87,7 +99,11 @@ export default function Home() {
             ))}
           </div>
           <p style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", fontWeight: 500 }}>
-            2,400+ locals already matched
+            {userCount === null
+              ? "Real Ìjèbú people, real connections"
+              : userCount >= EARLY_THRESHOLD
+                ? `${userCount.toLocaleString()}+ Ìjèbú people already here`
+                : "Be one of the first Ìjèbú souls here ❤️"}
           </p>
         </div>
 
