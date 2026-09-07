@@ -1,7 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/context/AuthContext";
 
 const inputStyle = {
   width: "100%", background: "rgba(255,255,255,0.1)",
@@ -12,18 +13,28 @@ const inputStyle = {
 
 export default function LoginPage() {
   const router = useRouter();
+  const { user } = useAuth();
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState("");
+  const [signedIn, setSignedIn] = useState(false);
+
+  // Navigate only once AuthContext has actually caught up with the session,
+  // instead of racing ahead of it right after signInWithPassword resolves.
+  useEffect(() => {
+    if (signedIn && user) {
+      router.push("/notifications/enable?next=/home");
+    }
+  }, [signedIn, user]);
 
   const handleSignIn = async () => {
     if (!email || !password) { setError("Please fill in all fields."); return; }
     setLoading(true); setError("");
     const { error: err } = await supabase.auth.signInWithPassword({ email, password });
     if (err) { setError(err.message); setLoading(false); return; }
-    router.push("/home");
+    setSignedIn(true); // AuthContext's onAuthStateChange will pick this up; the effect above navigates once it does
   };
 
   return (
@@ -63,8 +74,8 @@ export default function LoginPage() {
           <span style={{ fontSize: 13, color: "#D4AF37", fontWeight: 600, cursor: "pointer" }}>Forgot password?</span>
         </div>
 
-        <button onClick={handleSignIn} disabled={loading} style={{ width: "100%", background: loading ? "rgba(212,175,55,0.5)" : "#D4AF37", color: "#000", fontSize: 16, fontWeight: 800, border: "none", padding: "18px 0", borderRadius: 14, cursor: loading ? "not-allowed" : "pointer", marginBottom: 16 }}>
-          {loading ? "Signing in..." : "Sign in"}
+        <button onClick={handleSignIn} disabled={loading || signedIn} style={{ width: "100%", background: (loading || signedIn) ? "rgba(212,175,55,0.5)" : "#D4AF37", color: "#000", fontSize: 16, fontWeight: 800, border: "none", padding: "18px 0", borderRadius: 14, cursor: (loading || signedIn) ? "not-allowed" : "pointer", marginBottom: 16 }}>
+          {signedIn ? "Signing in..." : loading ? "Signing in..." : "Sign in"}
         </button>
 
         <p style={{ textAlign: "center", fontSize: 14, color: "rgba(255,255,255,0.5)" }}>
