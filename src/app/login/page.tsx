@@ -71,7 +71,7 @@ export default function LoginPage() {
         </div>
 
         <div style={{ textAlign: "right", marginBottom: 28 }}>
-          <span style={{ fontSize: 13, color: "#D4AF37", fontWeight: 600, cursor: "pointer" }}>Forgot password?</span>
+          <span onClick={() => router.push("/forgot-password")} style={{ fontSize: 13, color: "#D4AF37", fontWeight: 600, cursor: "pointer" }}>Forgot password?</span>
         </div>
 
         <button onClick={handleSignIn} disabled={loading || signedIn} style={{ width: "100%", background: (loading || signedIn) ? "rgba(212,175,55,0.5)" : "#D4AF37", color: "#000", fontSize: 16, fontWeight: 800, border: "none", padding: "18px 0", borderRadius: 14, cursor: (loading || signedIn) ? "not-allowed" : "pointer", marginBottom: 16 }}>
