@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { supabase, avatarUrl, uploadAvatar } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
-import BottomNav from "@/components/BottomNav";
+import BottomNav, { BOTTOM_NAV_HEIGHT } from "@/components/BottomNav";
 import Header from "@/components/Header";
 import type { Profile } from "@/lib/types";
 
@@ -182,7 +182,7 @@ export default function ProfilePage() {
         <button onClick={cancelEdit} style={{ background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 50, padding: "7px 16px", fontSize: 13, fontWeight: 600, color: colors.subtext, cursor: "pointer" }}>Cancel</button>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "24px 20px", display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: `24px 20px ${BOTTOM_NAV_HEIGHT}px` , display: "flex", flexDirection: "column", gap: 20 }}>
 
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
           <div style={{ width: 90, height: 90, borderRadius: "50%", background: colors.card, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", border: "3px solid #D4AF37", cursor: "pointer" }} onClick={() => fileRef.current?.click()}>
@@ -275,7 +275,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", paddingBottom: 20 }}>
+      <div style={{ flex: 1, overflowY: "auto", paddingBottom: BOTTOM_NAV_HEIGHT }}>
 
         <div style={{ padding: "0 20px 8px", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
           <div style={{ position: "relative" }}>

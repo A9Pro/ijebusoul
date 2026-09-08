@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { supabase, avatarUrl } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
-import BottomNav from "@/components/BottomNav";
+import BottomNav, { BOTTOM_NAV_HEIGHT } from "@/components/BottomNav";
 import Header from "@/components/Header";
 import ProfilePreviewModal from "@/components/ProfilePreviewModal";
 import type { Match, Message, Profile } from "@/lib/types";
@@ -65,7 +65,7 @@ export default function ChatsPage() {
     })();
   }, [user]);
 
-    useEffect(() => {
+  useEffect(() => {
     if (!activeMatch || !user) return;
 
     (async () => {
@@ -77,7 +77,6 @@ export default function ChatsPage() {
         .update({ read_at: new Date().toISOString() })
         .eq("match_id", activeMatch.id).neq("sender_id", user.id).is("read_at", null);
 
-      // reflect the read state locally — otherwise the list still shows the stale count on return
       if (!markErr) {
         setMatches(ms => ms.map(m => m.id === activeMatch.id ? { ...m, unread_count: 0 } : m));
       }
@@ -95,6 +94,15 @@ export default function ChatsPage() {
         if (msg.sender_id !== user.id) {
           supabase.from("messages").update({ read_at: new Date().toISOString() }).eq("id", msg.id);
         }
+      })
+      // Live "Seen" receipts: when the other person's client marks our
+      // sent messages as read, reflect that immediately without a reload.
+      .on("postgres_changes", {
+        event: "UPDATE", schema: "public", table: "messages",
+        filter: `match_id=eq.${activeMatch.id}`,
+      }, payload => {
+        const updated = payload.new as Message;
+        setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m));
       })
       .subscribe();
 
@@ -145,6 +153,12 @@ export default function ChatsPage() {
     const photo = avatarUrl(other?.photos?.[0] ?? other?.avatar_url);
     const isOnline = other?.online_at && (Date.now() - new Date(other.online_at).getTime()) < 300000;
 
+    // The most recent message I sent that the other person has read —
+    // that's the one that gets the "Seen HH:MM" label, WhatsApp-style,
+    // instead of stamping every single message.
+    const myMessages = messages.filter(m => m.sender_id === user?.id && m.read_at);
+    const lastSeenId = myMessages.length ? myMessages[myMessages.length - 1].id : null;
+
     return (
       <main style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: colors.bg, fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
 
@@ -164,22 +178,31 @@ export default function ChatsPage() {
           </div>
         </div>
 
-        <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: `20px 16px ${BOTTOM_NAV_HEIGHT}px`, display: "flex", flexDirection: "column", gap: 10 }}>
           {messages.length === 0 && (
             <div style={{ textAlign: "center", color: colors.subtext, fontSize: 14, marginTop: 60 }}>Say hi to {other?.name} 👋🏾</div>
           )}
-          {messages.map(msg => (
-            <div key={msg.id} style={{ display: "flex", justifyContent: msg.sender_id === user?.id ? "flex-end" : "flex-start" }}>
-              <div style={{ maxWidth: "72%", background: msg.sender_id === user?.id ? "#D4AF37" : colors.card, color: msg.sender_id === user?.id ? "#000" : colors.text, borderRadius: msg.sender_id === user?.id ? "18px 18px 4px 18px" : "18px 18px 18px 4px", padding: "11px 15px", fontSize: 14, lineHeight: 1.5 }}>
-                <div>{msg.content}</div>
-                <div style={{ fontSize: 10, marginTop: 4, color: msg.sender_id === user?.id ? "rgba(0,0,0,0.4)" : colors.subtext, textAlign: "right" }}>{timeStr(msg.created_at)}</div>
+          {messages.map(msg => {
+            const isMine = msg.sender_id === user?.id;
+            return (
+              <div key={msg.id} style={{ display: "flex", flexDirection: "column", alignItems: isMine ? "flex-end" : "flex-start" }}>
+                <div style={{ maxWidth: "72%", background: isMine ? "#D4AF37" : colors.card, color: isMine ? "#000" : colors.text, borderRadius: isMine ? "18px 18px 4px 18px" : "18px 18px 18px 4px", padding: "11px 15px", fontSize: 14, lineHeight: 1.5 }}>
+                  <div>{msg.content}</div>
+                  <div style={{ fontSize: 10, marginTop: 4, color: isMine ? "rgba(0,0,0,0.4)" : colors.subtext, textAlign: "right" }}>{timeStr(msg.created_at)}</div>
+                </div>
+                {/* Read receipt — only on the last message of mine that's been seen */}
+                {isMine && msg.id === lastSeenId && (
+                  <div style={{ fontSize: 10, color: colors.subtext, marginTop: 3, marginRight: 4 }}>
+                    Seen {timeStr(msg.read_at!)}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
           <div ref={bottomRef} />
         </div>
 
-        <div style={{ padding: "12px 16px 36px", borderTop: `1px solid ${colors.border}`, display: "flex", gap: 10, alignItems: "center", background: colors.bg }}>
+        <div style={{ padding: "12px 16px 36px", borderTop: `1px solid ${colors.border}`, display: "flex", gap: 10, alignItems: "center", background: colors.bg, position: "sticky", bottom: BOTTOM_NAV_HEIGHT - 30 }}>
           <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === "Enter" && sendMessage()} placeholder={`Message ${other?.name}...`} style={{ flex: 1, background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 50, padding: "13px 18px", fontSize: 14, color: colors.text, outline: "none", fontFamily: "system-ui" }} />
           <button onClick={sendMessage} disabled={sending} style={{ width: 46, height: 46, borderRadius: "50%", background: "#D4AF37", border: "none", fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>↑</button>
         </div>
@@ -229,7 +252,7 @@ export default function ChatsPage() {
 
       {matches.length > 0 && <div style={{ height: 1, background: colors.border, margin: "0 20px 16px" }} />}
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 16px" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: `0 16px ${BOTTOM_NAV_HEIGHT}px` }}>
         {matches.length === 0 ? (
           <div style={{ textAlign: "center", color: colors.subtext, fontSize: 14, paddingTop: 80 }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>💬</div>

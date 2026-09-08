@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { supabase, avatarUrl } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
-import BottomNav from "@/components/BottomNav";
+import BottomNav, { BOTTOM_NAV_HEIGHT } from "@/components/BottomNav";
 import Header from "@/components/Header";
 import ProfilePreviewModal from "@/components/ProfilePreviewModal";
 import type { Profile } from "@/lib/types";
@@ -165,60 +165,62 @@ export default function LikesPage() {
         ))}
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: `0 16px ${BOTTOM_NAV_HEIGHT}px` }}>
         {visible.length === 0 && (
           <div style={{ textAlign: "center", color: colors.subtext, fontSize: 14, paddingTop: 60 }}>
             {filter === "new" ? "No new likes yet 👀" : filter === "matched" ? "No matches yet — like someone back!" : "Nothing here yet 👀"}
           </div>
         )}
 
-        {visible.map(entry => {
-          const p     = entry.profile;
-          const badge = BADGE[p.looking_for ?? ""] ?? BADGE.relationship;
-          const photo = avatarUrl(p.photos?.[0] ?? p.avatar_url);
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {visible.map(entry => {
+            const p     = entry.profile;
+            const badge = BADGE[p.looking_for ?? ""] ?? BADGE.relationship;
+            const photo = avatarUrl(p.photos?.[0] ?? p.avatar_url);
 
-          return (
-            <div key={p.id} style={{ background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 20, overflow: "hidden" }}>
-              <div onClick={() => setPreviewProfile(p)} style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 16px 12px", cursor: "pointer" }}>
-                <div style={{ position: "relative", flexShrink: 0 }}>
-                  <div style={{ width: 62, height: 62, borderRadius: "50%", background: colors.bg, overflow: "hidden", border: entry.matched ? "3px solid #D4AF37" : `3px solid ${colors.border}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : <span style={{ fontSize: 28 }}>🙂</span>}
-                  </div>
-                  {entry.matched && (
-                    <div style={{ position: "absolute", bottom: 0, right: 0, width: 20, height: 20, borderRadius: "50%", background: "#D4AF37", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, border: `2px solid ${colors.bg}` }}>✓</div>
-                  )}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 16, fontWeight: 800 }}>{p.name}, {p.age}</span>
-                      {p.looking_for && (
-                        <span style={{ background: badge.bg, color: badge.color, fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 50 }}>
-                          {p.looking_for.charAt(0).toUpperCase() + p.looking_for.slice(1)}
-                        </span>
-                      )}
+            return (
+              <div key={p.id} style={{ background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 20, overflow: "hidden" }}>
+                <div onClick={() => setPreviewProfile(p)} style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 16px 12px", cursor: "pointer" }}>
+                  <div style={{ position: "relative", flexShrink: 0 }}>
+                    <div style={{ width: 62, height: 62, borderRadius: "50%", background: colors.bg, overflow: "hidden", border: entry.matched ? "3px solid #D4AF37" : `3px solid ${colors.border}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : <span style={{ fontSize: 28 }}>🙂</span>}
                     </div>
-                    <span style={{ fontSize: 11, color: colors.subtext, flexShrink: 0 }}>{timeAgo(entry.created_at)}</span>
+                    {entry.matched && (
+                      <div style={{ position: "absolute", bottom: 0, right: 0, width: 20, height: 20, borderRadius: "50%", background: "#D4AF37", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, border: `2px solid ${colors.bg}` }}>✓</div>
+                    )}
                   </div>
-                  {p.location && <div style={{ fontSize: 12, color: colors.subtext, marginBottom: 6 }}>📍 {p.location}</div>}
-                  {p.bio && <p style={{ fontSize: 13, color: colors.subtext, lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.bio}</p>}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 16, fontWeight: 800 }}>{p.name}, {p.age}</span>
+                        {p.looking_for && (
+                          <span style={{ background: badge.bg, color: badge.color, fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 50 }}>
+                            {p.looking_for.charAt(0).toUpperCase() + p.looking_for.slice(1)}
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: 11, color: colors.subtext, flexShrink: 0 }}>{timeAgo(entry.created_at)}</span>
+                    </div>
+                    {p.location && <div style={{ fontSize: 12, color: colors.subtext, marginBottom: 6 }}>📍 {p.location}</div>}
+                    {p.bio && <p style={{ fontSize: 13, color: colors.subtext, lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.bio}</p>}
+                  </div>
                 </div>
-              </div>
 
-              {!entry.matched ? (
-                <div style={{ display: "flex", gap: 10, padding: "0 16px 16px" }}>
-                  <button onClick={() => handlePass(entry)} style={{ flex: 1, background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 12, padding: "11px 0", color: colors.subtext, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Pass</button>
-                  <button onClick={() => handleLikeBack(entry)} style={{ flex: 2, background: "#D4AF37", border: "none", borderRadius: 12, padding: "11px 0", fontSize: 14, fontWeight: 800, color: "#000", cursor: "pointer" }}>❤️ Like back</button>
-                </div>
-              ) : (
-                <div style={{ display: "flex", gap: 10, padding: "0 16px 16px" }}>
-                  <div style={{ flex: 1, background: "rgba(212,175,55,0.1)", border: "1px solid rgba(212,175,55,0.25)", borderRadius: 12, padding: "10px 0", textAlign: "center", fontSize: 13, fontWeight: 700, color: "#D4AF37" }}>🎉 Matched!</div>
-                  <button onClick={() => router.push("/chats")} style={{ flex: 1, background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 600, color: colors.subtext, cursor: "pointer" }}>💬 Message</button>
-                </div>
-              )}
-            </div>
-          );
-        })}
+                {!entry.matched ? (
+                  <div style={{ display: "flex", gap: 10, padding: "0 16px 16px" }}>
+                    <button onClick={() => handlePass(entry)} style={{ flex: 1, background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 12, padding: "11px 0", color: colors.subtext, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Pass</button>
+                    <button onClick={() => handleLikeBack(entry)} style={{ flex: 2, background: "#D4AF37", border: "none", borderRadius: 12, padding: "11px 0", fontSize: 14, fontWeight: 800, color: "#000", cursor: "pointer" }}>❤️ Like back</button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 10, padding: "0 16px 16px" }}>
+                    <div style={{ flex: 1, background: "rgba(212,175,55,0.1)", border: "1px solid rgba(212,175,55,0.25)", borderRadius: 12, padding: "10px 0", textAlign: "center", fontSize: 13, fontWeight: 700, color: "#D4AF37" }}>🎉 Matched!</div>
+                    <button onClick={() => router.push("/chats")} style={{ flex: 1, background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 600, color: colors.subtext, cursor: "pointer" }}>💬 Message</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <BottomNav />

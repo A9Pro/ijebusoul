@@ -4,8 +4,9 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase, avatarUrl } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
-import BottomNav from "@/components/BottomNav";
+import BottomNav, { BOTTOM_NAV_HEIGHT } from "@/components/BottomNav";
 import Header from "@/components/Header";
+import ImageLightbox from "@/components/ImageLightbox";
 import type { Profile } from "@/lib/types";
 
 export default function PublicProfilePage() {
@@ -19,6 +20,7 @@ export default function PublicProfilePage() {
   const [fetching, setFetching]   = useState(true);
   const [activeTab, setActiveTab] = useState<"photos" | "about">("photos");
   const [isFollowing, setIsFollowing] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -78,18 +80,33 @@ export default function PublicProfilePage() {
   const mainPic = avatarUrl(photos[0] ?? profile.avatar_url);
   const isSelf  = user?.id === profile.id;
 
+  const lightboxPhotos: string[] = photos.length
+    ? (photos as string[]).map(p => avatarUrl(p)!).filter(Boolean)
+    : (profile.avatar_url ? [avatarUrl(profile.avatar_url)!].filter(Boolean) : []);
+
   return (
     <main style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: colors.bg, fontFamily: "system-ui", display: "flex", flexDirection: "column", color: colors.text }}>
       <Header />
+
+      {lightboxIndex !== null && (
+        <ImageLightbox
+          photos={lightboxPhotos}
+          initialIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "20px 20px 8px" }}>
         <button onClick={() => router.back()} style={{ background: colors.card, border: `1px solid ${colors.border}`, borderRadius: "50%", width: 36, height: 36, color: colors.text, fontSize: 16, cursor: "pointer" }}>←</button>
         <h1 style={{ fontSize: 18, fontWeight: 900, letterSpacing: "-0.02em" }}>Profile</h1>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", paddingBottom: 20 }}>
+      <div style={{ flex: 1, overflowY: "auto", paddingBottom: BOTTOM_NAV_HEIGHT }}>
         <div style={{ padding: "8px 20px 8px", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-          <div style={{ width: 100, height: 100, borderRadius: "50%", background: colors.card, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", border: "3px solid #D4AF37" }}>
+          <div
+            onClick={() => lightboxPhotos.length && setLightboxIndex(0)}
+            style={{ width: 100, height: 100, borderRadius: "50%", background: colors.card, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", border: "3px solid #D4AF37", cursor: lightboxPhotos.length ? "pointer" : "default" }}
+          >
             {mainPic ? <img src={mainPic} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt={profile.name} /> : <span style={{ fontSize: 52 }}>🙂</span>}
           </div>
           <div style={{ textAlign: "center" }}>
@@ -130,7 +147,11 @@ export default function PublicProfilePage() {
             ) : (photos as string[]).map((path, i) => {
               const url = avatarUrl(path);
               return (
-                <div key={i} style={{ borderRadius: 12, aspectRatio: "1", background: colors.card, overflow: "hidden", position: "relative" }}>
+                <div
+                  key={i}
+                  onClick={() => setLightboxIndex(i)}
+                  style={{ borderRadius: 12, aspectRatio: "1", background: colors.card, overflow: "hidden", position: "relative", cursor: "pointer" }}
+                >
                   {url && <img src={url} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />}
                   {i === 0 && <div style={{ position: "absolute", top: 6, left: 6, background: "#D4AF37", borderRadius: 50, padding: "2px 8px", fontSize: 10, fontWeight: 800, color: "#000" }}>Main</div>}
                 </div>

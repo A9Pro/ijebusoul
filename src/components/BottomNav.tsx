@@ -10,6 +10,11 @@ const NAV_ITEMS = [
   { id: "profile",  path: "/profile", icon: "👤", label: "Profile" },
 ];
 
+// Exported so page containers can reserve this much bottom padding on their
+// scrollable content — otherwise the last bit of content would sit hidden
+// underneath the fixed nav. Includes slack for the safe-area inset.
+export const BOTTOM_NAV_HEIGHT = 96;
+
 export default function BottomNav() {
   const router   = useRouter();
   const pathname = usePathname();
@@ -17,9 +22,16 @@ export default function BottomNav() {
 
   return (
     <div style={{
-      width: "100%", flexShrink: 0,
+      position: "fixed",
+      bottom: 0,
+      left: "50%",
+      transform: "translateX(-50%)",
+      width: "100%",
+      maxWidth: 430,
+      zIndex: 50,
       display: "flex", justifyContent: "space-around", alignItems: "center",
-      padding: "10px 0 30px", background: colors.bg,
+      padding: "10px 0 calc(14px + env(safe-area-inset-bottom, 0px))",
+      background: colors.bg,
       borderTop: `1px solid ${colors.border}`,
     }}>
       {NAV_ITEMS.map((item) => {

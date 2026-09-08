@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { supabase, avatarUrl, postMediaUrl } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme, type Theme } from "@/context/ThemeContext";
-import BottomNav from "@/components/BottomNav";
+import BottomNav, { BOTTOM_NAV_HEIGHT } from "@/components/BottomNav";
 import Header from "@/components/Header";
 import type { Post } from "@/lib/types";
 
@@ -443,7 +443,7 @@ export default function FeedPage() {
         <button onClick={() => setShowCreate(true)} style={{ background: "#D4AF37", border: "none", borderRadius: 50, padding: "8px 18px", fontSize: 13, fontWeight: 700, color: "#000", cursor: "pointer" }}>+ Post</button>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", paddingBottom: 20 }}>
+      <div style={{ flex: 1, overflowY: "auto", paddingBottom: BOTTOM_NAV_HEIGHT }}>
         {posts.length === 0 ? (
           <div style={{ textAlign: "center", color: colors.subtext, fontSize: 14, paddingTop: 80 }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>📭</div>
