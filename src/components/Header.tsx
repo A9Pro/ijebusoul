@@ -10,24 +10,28 @@ import type { Profile } from "@/lib/types";
 interface NotificationRow {
   id: string;
   actor_id: string | null;
-  type: "post_like" | "post_comment" | "swipe_like" | "match" | "message" | "follow";
+  type: "post_like" | "post_comment" | "swipe_like" | "match" | "message" | "follow" | "invite_prompt" | "referral_joined" | "referral_reward";
   read: boolean;
   created_at: string;
   actor?: Profile | null;
 }
 
 const COPY: Record<NotificationRow["type"], (name: string) => string> = {
-  post_like:    (n) => `${n} liked your post`,
-  post_comment: (n) => `${n} commented on your post`,
-  swipe_like:   (n) => `${n} liked your profile`,
-  match:        (n) => `You and ${n} matched! 🎉`,
-  message:      (n) => `${n} sent you a message`,
-  follow:       (n) => `${n} started following you`,
+  post_like:       (n) => `${n} liked your post`,
+  post_comment:    (n) => `${n} commented on your post`,
+  swipe_like:      (n) => `${n} liked your profile`,
+  match:           (n) => `You and ${n} matched! 🎉`,
+  message:         (n) => `${n} sent you a message`,
+  follow:          (n) => `${n} started following you`,
+  invite_prompt:   ()  => `🎁 Invite your ìjèbú friends — earn 7 days Premium when 3 friends join!`,
+  referral_joined: (n) => `${n} joined ìjèbú soul through your invite! 🎉`,
+  referral_reward: ()  => `You earned 7 days Premium — 3 friends joined through your invites! 🎁`,
 };
 
 const ICON: Record<NotificationRow["type"], string> = {
   post_like: "❤️", post_comment: "💬", swipe_like: "💛",
   match: "🎉", message: "✉️", follow: "➕",
+  invite_prompt: "🎁", referral_joined: "🤝", referral_reward: "🎉",
 };
 
 const timeAgo = (iso: string) => {
@@ -111,6 +115,7 @@ export default function Header() {
     if (n.type === "post_like" || n.type === "post_comment") router.push("/feed");
     else if (n.type === "swipe_like") router.push("/likes");
     else if (n.type === "match" || n.type === "message") router.push("/chats");
+    else if (n.type === "invite_prompt" || n.type === "referral_joined" || n.type === "referral_reward") router.push("/invite");
   };
 
   const THEME_OPTIONS: { id: Theme; label: string; icon: string; desc: string }[] = [

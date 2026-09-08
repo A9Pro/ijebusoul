@@ -13,6 +13,8 @@ export type Profile = {
   photos: string[];
   online_at?: string;
   created_at: string;
+  referral_code?: string;
+  premium_until?: string | null;
 };
 
 export type Match = {
@@ -55,7 +57,16 @@ export type Notification = {
   id: string;
   user_id: string;
   actor_id: string | null;
-  type: "post_like" | "post_comment" | "swipe_like" | "match" | "message" | "follow";
+  type:
+    | "post_like"
+    | "post_comment"
+    | "swipe_like"
+    | "match"
+    | "message"
+    | "follow"
+    | "invite_prompt"
+    | "referral_joined"
+    | "referral_reward";
   post_id?: string | null;
   message_id?: string | null;
   read: boolean;

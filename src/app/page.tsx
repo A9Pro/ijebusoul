@@ -1,13 +1,19 @@
 "use client";
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 const EARLY_THRESHOLD = 50; // below this, show "be one of the first" instead of a small raw number
 
-export default function Home() {
+function HomeInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [userCount, setUserCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    const ref = searchParams.get("ref");
+    if (ref) localStorage.setItem("ijebu-referral-code", ref);
+  }, [searchParams]);
 
   useEffect(() => {
     (async () => {
@@ -139,5 +145,13 @@ export default function Home() {
         </p>
       </div>
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={null}>
+      <HomeInner />
+    </Suspense>
   );
 }

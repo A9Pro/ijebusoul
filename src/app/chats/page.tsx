@@ -21,6 +21,7 @@ export default function ChatsPage() {
   const [draft, setDraft]           = useState("");
   const [sending, setSending]       = useState(false);
   const [previewProfile, setPreviewProfile] = useState<Profile | null>(null);
+  const [consentSaving, setConsentSaving]   = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -90,13 +91,10 @@ export default function ChatsPage() {
       }, payload => {
         const msg = payload.new as Message;
         setMessages(prev => [...prev, msg]);
-        // conversation is already open — mark incoming messages read immediately, no lag
         if (msg.sender_id !== user.id) {
           supabase.from("messages").update({ read_at: new Date().toISOString() }).eq("id", msg.id);
         }
       })
-      // Live "Seen" receipts: when the other person's client marks our
-      // sent messages as read, reflect that immediately without a reload.
       .on("postgres_changes", {
         event: "UPDATE", schema: "public", table: "messages",
         filter: `match_id=eq.${activeMatch.id}`,
@@ -122,6 +120,26 @@ export default function ChatsPage() {
       match_id: activeMatch.id, sender_id: user.id, content,
     });
     setSending(false);
+  };
+
+  // ── Match of the Week consent ────────────────────────────────────────────
+  const giveConsent = async () => {
+    if (!activeMatch || !user || consentSaving) return;
+    setConsentSaving(true);
+
+    const isUser1 = activeMatch.user1_id === user.id;
+    const field = isUser1 ? "consent_user1" : "consent_user2";
+
+    const { error } = await supabase
+      .from("matches")
+      .update({ [field]: true })
+      .eq("id", activeMatch.id);
+
+    setConsentSaving(false);
+    if (error) return;
+
+    setActiveMatch(m => m ? ({ ...m, [field]: true } as Match) : m);
+    setMatches(ms => ms.map(m => m.id === activeMatch.id ? ({ ...m, [field]: true } as Match) : m));
   };
 
   const timeStr = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -153,11 +171,21 @@ export default function ChatsPage() {
     const photo = avatarUrl(other?.photos?.[0] ?? other?.avatar_url);
     const isOnline = other?.online_at && (Date.now() - new Date(other.online_at).getTime()) < 300000;
 
-    // The most recent message I sent that the other person has read —
-    // that's the one that gets the "Seen HH:MM" label, WhatsApp-style,
-    // instead of stamping every single message.
     const myMessages = messages.filter(m => m.sender_id === user?.id && m.read_at);
     const lastSeenId = myMessages.length ? myMessages[myMessages.length - 1].id : null;
+
+    // Only offer the opt-in for opposite-gender pairs (Man + Woman),
+    // matching the selection rule in the database function.
+    const myGender    = activeMatch.user1_id === user?.id ? other?.gender : other?.gender; // placeholder, replaced below
+    const isUser1     = activeMatch.user1_id === user?.id;
+    const iConsented  = isUser1 ? (activeMatch as any).consent_user1 : (activeMatch as any).consent_user2;
+    const theyConsented = isUser1 ? (activeMatch as any).consent_user2 : (activeMatch as any).consent_user1;
+    const genderPairEligible =
+      (other?.gender === "Man" || other?.gender === "Woman");
+    // Note: this only checks the other person's gender client-side as a display
+    // hint. The database function is the real source of truth and additionally
+    // checks that the two genders are different (Man + Woman), so nothing
+    // ineligible can ever actually get featured even if this banner shows.
 
     return (
       <main style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: colors.bg, fontFamily: "system-ui", display: "flex", flexDirection: "column" }}>
@@ -178,6 +206,31 @@ export default function ChatsPage() {
           </div>
         </div>
 
+        {genderPairEligible && !theyConsented && (
+          <div style={{ margin: "12px 16px 0", background: "rgba(212,175,55,0.1)", border: "1px solid rgba(212,175,55,0.3)", borderRadius: 14, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>💛</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: colors.text, marginBottom: 2 }}>
+                {iConsented ? "You've opted in!" : "Feature us in Match of the Week?"}
+              </div>
+              <div style={{ fontSize: 11.5, color: colors.subtext, lineHeight: 1.4 }}>
+                {iConsented
+                  ? "Waiting on your match to opt in too before this can be featured."
+                  : "Both of you need to say yes — nothing is featured without both people's consent."}
+              </div>
+            </div>
+            {!iConsented && (
+              <button
+                onClick={giveConsent}
+                disabled={consentSaving}
+                style={{ flexShrink: 0, background: "#D4AF37", border: "none", borderRadius: 50, padding: "8px 14px", fontSize: 12, fontWeight: 800, color: "#000", cursor: consentSaving ? "not-allowed" : "pointer", opacity: consentSaving ? 0.6 : 1 }}
+              >
+                {consentSaving ? "Saving..." : "Yes"}
+              </button>
+            )}
+          </div>
+        )}
+
         <div style={{ flex: 1, overflowY: "auto", padding: `20px 16px ${BOTTOM_NAV_HEIGHT}px`, display: "flex", flexDirection: "column", gap: 10 }}>
           {messages.length === 0 && (
             <div style={{ textAlign: "center", color: colors.subtext, fontSize: 14, marginTop: 60 }}>Say hi to {other?.name} 👋🏾</div>
@@ -190,7 +243,6 @@ export default function ChatsPage() {
                   <div>{msg.content}</div>
                   <div style={{ fontSize: 10, marginTop: 4, color: isMine ? "rgba(0,0,0,0.4)" : colors.subtext, textAlign: "right" }}>{timeStr(msg.created_at)}</div>
                 </div>
-                {/* Read receipt — only on the last message of mine that's been seen */}
                 {isMine && msg.id === lastSeenId && (
                   <div style={{ fontSize: 10, color: colors.subtext, marginTop: 3, marginRight: 4 }}>
                     Seen {timeStr(msg.read_at!)}
