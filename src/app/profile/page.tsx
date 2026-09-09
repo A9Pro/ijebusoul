@@ -6,6 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import BottomNav, { BOTTOM_NAV_HEIGHT } from "@/components/BottomNav";
 import Header from "@/components/Header";
+import InviteCard from "@/components/InviteCard";
 import type { Profile } from "@/lib/types";
 
 const INTEREST_SUGGESTIONS = ["Suya lover","Owanbe ready","AFC Ijebu","Egusi connoisseur","Owambe DJ","Yoruba culture","Beach trips","Deep convos","Food lover","Music head"];
@@ -299,6 +300,8 @@ export default function ProfilePage() {
         </div>
 
         {StatsRow}
+
+        <InviteCard />
 
         <div style={{ display: "flex", borderBottom: `1px solid ${colors.border}`, padding: "0 20px" }}>
           {(["photos", "about"] as const).map(tab => (

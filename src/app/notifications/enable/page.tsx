@@ -34,8 +34,13 @@ function EnableNotificationsInner() {
   const handleEnable = async () => {
     if (!user) return;
     setStage("enabling");
-    const ok = await subscribeToPush(user.id);
-    setStage(ok ? "success" : "failed");
+    try {
+      const ok = await subscribeToPush(user.id);
+      setStage(ok ? "success" : "failed");
+    } catch (err) {
+      console.error("Enable notifications failed:", err);
+      setStage("failed");
+    }
     setTimeout(finish, 1800);
   };
 
