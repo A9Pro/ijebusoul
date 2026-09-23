@@ -7,6 +7,11 @@ import { useTheme, type Theme } from "@/context/ThemeContext";
 import BottomNav, { BOTTOM_NAV_HEIGHT } from "@/components/BottomNav";
 import Header from "@/components/Header";
 import type { Post } from "@/lib/types";
+import {
+  Heart, MessageCircle, Share2, Bookmark, MoreHorizontal, X,
+  Image as ImageIcon, Type as TypeIcon, Pencil, Trash2,
+  Volume2, VolumeX, Inbox, Plus, ArrowUp,
+} from "lucide-react";
 
 interface CommentItem {
   id: string;
@@ -18,7 +23,99 @@ interface CommentItem {
 }
 
 const BG_COLORS = ["#1a1a2e", "#2e1a1a", "#1a2e1e", "#2e2a1a", "#241a2e", "#1a2830", "#000000", "#3a2a1a"];
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024;   // 15MB
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024;  // 100MB
 
+// ── Double-tap helper (single tap fires after a short delay unless a second tap cancels it) ──
+function useDoubleTap(onSingle: (() => void) | null, onDouble: () => void, delay = 250) {
+  const lastTap = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  return () => {
+    const now = Date.now();
+    if (now - lastTap.current < delay) {
+      if (timer.current) clearTimeout(timer.current);
+      lastTap.current = 0;
+      onDouble();
+    } else {
+      lastTap.current = now;
+      timer.current = setTimeout(() => { onSingle?.(); }, delay);
+    }
+  };
+}
+
+// ── Media frame: photo or video, with TikTok-style autoplay-in-view video + double-tap like ──
+function PostMedia({
+  isVideo, media, colors, liked, onDoubleLike,
+}: {
+  isVideo: boolean; media: string; colors: ReturnType<typeof useTheme>["colors"];
+  liked: boolean; onDoubleLike: () => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [muted, setMuted] = useState(true);
+  const [showBurst, setShowBurst] = useState(false);
+
+  useEffect(() => {
+    if (!isVideo || !videoRef.current) return;
+    const el = videoRef.current;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && entry.intersectionRatio > 0.6) {
+          el.play().catch(() => {});
+        } else {
+          el.pause();
+        }
+      },
+      { threshold: [0, 0.6, 1] }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isVideo]);
+
+  const togglePlay = () => {
+    if (!videoRef.current) return;
+    if (videoRef.current.paused) videoRef.current.play().catch(() => {});
+    else videoRef.current.pause();
+  };
+
+  const burst = () => {
+    if (!liked) onDoubleLike();
+    setShowBurst(true);
+    setTimeout(() => setShowBurst(false), 800);
+  };
+
+  const handleTap = useDoubleTap(isVideo ? togglePlay : null, burst);
+
+  return (
+    <div
+      onClick={handleTap}
+      style={{ margin: "0 16px 12px", borderRadius: 18, overflow: "hidden", position: "relative", background: colors.card, aspectRatio: "4 / 5", cursor: "pointer" }}
+    >
+      {isVideo ? (
+        <video ref={videoRef} src={media} muted={muted} loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      ) : (
+        <img src={media} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+      )}
+
+      {isVideo && (
+        <button
+          onClick={(e) => { e.stopPropagation(); setMuted(m => !m); }}
+          style={{ position: "absolute", bottom: 12, right: 12, width: 34, height: 34, borderRadius: "50%", background: "rgba(0,0,0,0.5)", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+        >
+          {muted ? <VolumeX size={16} color="#fff" /> : <Volume2 size={16} color="#fff" />}
+        </button>
+      )}
+
+      {showBurst && (
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+          <Heart size={90} color="#fff" fill="#fff" style={{ animation: "heartPop 0.8s ease forwards", filter: "drop-shadow(0 2px 10px rgba(0,0,0,0.4))" }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Post creation / edit modal ────────────────────────────────────────────────
 interface CreatePostModalProps {
   userId: string;
   editingPost?: Post | null;
@@ -32,35 +129,47 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated, c
   const fileRef                   = useRef<HTMLInputElement>(null);
   const isEditing                 = !!editingPost;
   const [caption, setCaption]     = useState(editingPost?.caption ?? "");
-  const [postType, setPostType]   = useState<"text" | "photo">(editingPost?.type === "photo" ? "photo" : "text");
+  const [postType, setPostType]   = useState<"text" | "media">(editingPost && editingPost.type !== "text" ? "media" : "text");
+  const [mediaKind, setMediaKind] = useState<"photo" | "video" | null>(
+    editingPost?.type === "video" ? "video" : editingPost?.type === "photo" ? "photo" : null
+  );
   const [bgColor, setBgColor]     = useState(editingPost?.bg_color ?? BG_COLORS[0]);
   const [file, setFile]           = useState<File | null>(null);
   const [preview, setPreview]     = useState<string | null>(
-    editingPost?.type === "photo" ? postMediaUrl(editingPost.media_url) : null
+    editingPost && editingPost.type !== "text" ? postMediaUrl(editingPost.media_url) : null
   );
-  const [removeExistingPhoto, setRemoveExistingPhoto] = useState(false);
+  const [removeExistingMedia, setRemoveExistingMedia] = useState(false);
   const [saving, setSaving]       = useState(false);
   const [error, setError]         = useState("");
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
+    const isVideo = f.type.startsWith("video/");
+    const limit = isVideo ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
+    if (f.size > limit) {
+      setError(isVideo ? "Video must be under 100MB." : "Image must be under 15MB.");
+      return;
+    }
     setFile(f);
     setPreview(URL.createObjectURL(f));
-    setPostType("photo");
-    setRemoveExistingPhoto(false);
+    setMediaKind(isVideo ? "video" : "photo");
+    setPostType("media");
+    setRemoveExistingMedia(false);
+    setError("");
   };
 
-  const handleRemovePhoto = () => {
+  const handleRemoveMedia = () => {
     setFile(null);
     setPreview(null);
-    setRemoveExistingPhoto(true);
+    setMediaKind(null);
+    setRemoveExistingMedia(true);
     if (fileRef.current) fileRef.current.value = "";
   };
 
   const handleSubmit = async () => {
-    if (!caption.trim() && !file && !(editingPost?.media_url && !removeExistingPhoto)) {
-      setError("Add a caption or photo.");
+    if (!caption.trim() && !file && !(editingPost && editingPost.type !== "text" && !removeExistingMedia)) {
+      setError("Add a caption or media.");
       return;
     }
     setSaving(true);
@@ -77,16 +186,18 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated, c
           const { error: uploadErr } = await supabase.storage.from("posts").upload(path, file, { upsert: true });
           if (uploadErr) throw uploadErr;
           mediaPath = path;
-        } else if (removeExistingPhoto) {
+        } else if (removeExistingMedia) {
           mediaPath = null;
         }
+
+        const finalType = postType === "text" || !mediaPath ? "text" : (mediaKind ?? editingPost.type);
 
         const { data, error: updateErr } = await supabase
           .from("posts")
           .update({
-            type:      postType === "photo" && mediaPath ? "photo" : "text",
+            type:      finalType,
             caption:   caption.trim(),
-            media_url: postType === "photo" ? mediaPath : null,
+            media_url: finalType === "text" ? null : mediaPath,
             bg_color:  bgColor,
           })
           .eq("id", editingPost.id)
@@ -95,7 +206,7 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated, c
 
         if (updateErr) throw updateErr;
 
-        if (oldPath && (file || removeExistingPhoto)) {
+        if (oldPath && (file || removeExistingMedia)) {
           await supabase.storage.from("posts").remove([oldPath]).catch(() => {});
         }
 
@@ -118,7 +229,7 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated, c
         .from("posts")
         .insert({
           user_id:        userId,
-          type:            file ? "photo" : "text",
+          type:            mediaPath ? (mediaKind ?? "photo") : "text",
           caption:         caption.trim(),
           media_url:       mediaPath,
           bg_color:        bgColor,
@@ -141,19 +252,28 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated, c
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div style={{ width: "100%", maxWidth: 430, background: colors.card, borderRadius: "24px 24px 0 0", padding: "24px 20px 48px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ width: "100%", maxWidth: 430, background: colors.card, borderRadius: "24px 24px 0 0", padding: "24px 20px 48px", display: "flex", flexDirection: "column", gap: 16, maxHeight: "88vh", overflowY: "auto" }}>
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h2 style={{ fontSize: 18, fontWeight: 900, color: colors.text }}>{isEditing ? "Edit post" : "New post"}</h2>
-          <button onClick={onClose} style={{ background: colors.bg, border: "none", borderRadius: 50, width: 34, height: 34, fontSize: 16, color: colors.subtext, cursor: "pointer" }}>✕</button>
+          <button onClick={onClose} style={{ background: colors.bg, border: "none", borderRadius: 50, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+            <X size={16} color={colors.subtext} />
+          </button>
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
-          {(["text", "photo"] as const).map(t => (
-            <button key={t} onClick={() => setPostType(t)} style={{ flex: 1, background: postType === t ? "#D4AF37" : colors.bg, border: "none", borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 700, color: postType === t ? "#000" : colors.subtext, cursor: "pointer" }}>
-              {t === "text" ? "✍️ Text" : "📷 Photo"}
-            </button>
-          ))}
+          <button
+            onClick={() => setPostType("text")}
+            style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: postType === "text" ? "#D4AF37" : colors.bg, border: "none", borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 700, color: postType === "text" ? "#000" : colors.subtext, cursor: "pointer" }}
+          >
+            <TypeIcon size={15} /> Text
+          </button>
+          <button
+            onClick={() => setPostType("media")}
+            style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: postType === "media" ? "#D4AF37" : colors.bg, border: "none", borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 700, color: postType === "media" ? "#000" : colors.subtext, cursor: "pointer" }}
+          >
+            <ImageIcon size={15} /> Photo / Video
+          </button>
         </div>
 
         {postType === "text" && (
@@ -180,19 +300,30 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated, c
           </div>
         )}
 
-        {postType === "photo" && (
+        {postType === "media" && (
           <div style={{ position: "relative" }}>
-            <div onClick={() => fileRef.current?.click()} style={{ borderRadius: 16, background: preview ? "transparent" : colors.bg, border: `2px dashed ${preview ? "transparent" : colors.border}`, height: 180, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", overflow: "hidden" }}>
-              {preview
-                ? <img src={preview} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
-                : <div style={{ textAlign: "center", color: colors.subtext }}><div style={{ fontSize: 36, marginBottom: 8 }}>📷</div><div style={{ fontSize: 13 }}>Tap to choose photo</div></div>
-              }
+            <div
+              onClick={() => fileRef.current?.click()}
+              style={{ borderRadius: 16, background: preview ? "transparent" : colors.bg, border: `2px dashed ${preview ? "transparent" : colors.border}`, height: 220, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", overflow: "hidden" }}
+            >
+              {preview ? (
+                mediaKind === "video"
+                  ? <video src={preview} controls style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : <img src={preview} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+              ) : (
+                <div style={{ textAlign: "center", color: colors.subtext }}>
+                  <ImageIcon size={32} style={{ marginBottom: 8 }} />
+                  <div style={{ fontSize: 13 }}>Tap to choose a photo or video</div>
+                </div>
+              )}
             </div>
             {preview && (
               <button
-                onClick={(e) => { e.stopPropagation(); handleRemovePhoto(); }}
-                style={{ position: "absolute", top: 10, right: 10, background: "rgba(0,0,0,0.65)", border: "none", borderRadius: 50, width: 30, height: 30, fontSize: 14, color: "#fff", cursor: "pointer" }}
-              >✕</button>
+                onClick={(e) => { e.stopPropagation(); handleRemoveMedia(); }}
+                style={{ position: "absolute", top: 10, right: 10, background: "rgba(0,0,0,0.65)", border: "none", borderRadius: 50, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+              >
+                <X size={14} color="#fff" />
+              </button>
             )}
           </div>
         )}
@@ -201,7 +332,7 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated, c
         <textarea
           value={caption}
           onChange={e => setCaption(e.target.value)}
-          placeholder={postType === "text" ? "What's on your mind? 🌍" : "Add a caption..."}
+          placeholder={postType === "text" ? "What's on your mind?" : "Add a caption..."}
           maxLength={300}
           rows={postType === "text" ? 5 : 3}
           style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 14, padding: "14px 16px", fontSize: 15, color: colors.text, outline: "none", resize: "none", lineHeight: 1.6, fontFamily: "system-ui" }}
@@ -211,13 +342,14 @@ const CreatePostModal = ({ userId, editingPost, onClose, onCreated, onUpdated, c
         {error && <div style={{ background: "rgba(255,51,102,0.15)", border: "1px solid rgba(255,51,102,0.3)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#FF3366" }}>{error}</div>}
 
         <button onClick={handleSubmit} disabled={saving} style={{ width: "100%", background: saving ? "rgba(212,175,55,0.4)" : "#D4AF37", border: "none", borderRadius: 14, padding: "16px 0", fontSize: 15, fontWeight: 800, color: saving ? "rgba(0,0,0,0.4)" : "#000", cursor: saving ? "not-allowed" : "pointer" }}>
-          {saving ? (isEditing ? "Saving..." : "Posting...") : (isEditing ? "Save changes ✓" : "Share post 🚀")}
+          {saving ? (mediaKind === "video" ? "Uploading video..." : isEditing ? "Saving..." : "Posting...") : (isEditing ? "Save changes" : "Post")}
         </button>
       </div>
     </div>
   );
 };
 
+// ── Feed page ─────────────────────────────────────────────────────────────────
 export default function FeedPage() {
   const router = useRouter();
   const { user, profile: myProfile, loading: authLoading } = useAuth();
@@ -371,7 +503,7 @@ export default function FeedPage() {
       }
     } else if (typeof navigator !== "undefined" && navigator.clipboard) {
       await navigator.clipboard.writeText(url);
-      showToast("Link copied! 🔗", "#D4AF37");
+      showToast("Link copied", "#D4AF37");
     }
   };
 
@@ -408,7 +540,7 @@ export default function FeedPage() {
       <Header />
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center", color: colors.subtext }}>
-          <div style={{ fontSize: 36, marginBottom: 16 }}>▶️</div>
+          <div style={{ width: 32, height: 32, border: `3px solid ${colors.border}`, borderTopColor: colors.accent, borderRadius: "50%", margin: "0 auto 16px", animation: "spin 0.8s linear infinite" }} />
           <div style={{ fontSize: 14 }}>Loading feed...</div>
         </div>
       </div>
@@ -418,6 +550,18 @@ export default function FeedPage() {
 
   return (
     <main style={{ minHeight: "100dvh", maxWidth: 430, margin: "0 auto", background: colors.bg, fontFamily: "system-ui", display: "flex", flexDirection: "column", position: "relative" }}>
+
+      <style>{`
+        @keyframes heartPop {
+          0% { transform: scale(0); opacity: 0; }
+          15% { transform: scale(1.2); opacity: 1; }
+          30% { transform: scale(1); opacity: 1; }
+          100% { transform: scale(1); opacity: 0; }
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
 
       {toast && (
         <div style={{ position: "fixed", top: 20, left: "50%", transform: "translateX(-50%)", background: toast.color, color: "#fff", fontSize: 13, fontWeight: 700, padding: "10px 20px", borderRadius: 50, zIndex: 200, whiteSpace: "nowrap" }}>
@@ -440,16 +584,20 @@ export default function FeedPage() {
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", background: colors.bg, borderBottom: `1px solid ${colors.border}`, position: "sticky", top: 0, zIndex: 10 }}>
         <h1 style={{ fontSize: 24, fontWeight: 900, color: colors.text, letterSpacing: "-0.03em" }}>ìjèbú <span style={{ color: "#D4AF37" }}>feed</span></h1>
-        <button onClick={() => setShowCreate(true)} style={{ background: "#D4AF37", border: "none", borderRadius: 50, padding: "8px 18px", fontSize: 13, fontWeight: 700, color: "#000", cursor: "pointer" }}>+ Post</button>
+        <button onClick={() => setShowCreate(true)} style={{ display: "flex", alignItems: "center", gap: 5, background: "#D4AF37", border: "none", borderRadius: 50, padding: "8px 16px 8px 12px", fontSize: 13, fontWeight: 700, color: "#000", cursor: "pointer" }}>
+          <Plus size={15} strokeWidth={2.5} /> Post
+        </button>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: BOTTOM_NAV_HEIGHT }}>
         {posts.length === 0 ? (
           <div style={{ textAlign: "center", color: colors.subtext, fontSize: 14, paddingTop: 80 }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>📭</div>
-            No posts yet. Be the first to share!
-            <br />
-            <button onClick={() => setShowCreate(true)} style={{ marginTop: 20, background: "#D4AF37", border: "none", borderRadius: 50, padding: "12px 28px", fontSize: 14, fontWeight: 700, color: "#000", cursor: "pointer" }}>Create first post</button>
+            <Inbox size={44} style={{ marginBottom: 16 }} />
+            <div style={{ fontSize: 16, fontWeight: 700, color: colors.text, marginBottom: 4 }}>No posts yet</div>
+            <div>Be the first to share something with the community.</div>
+            <button onClick={() => setShowCreate(true)} style={{ marginTop: 20, display: "inline-flex", alignItems: "center", gap: 6, background: "#D4AF37", border: "none", borderRadius: 50, padding: "12px 24px", fontSize: 14, fontWeight: 700, color: "#000", cursor: "pointer" }}>
+              <Plus size={15} strokeWidth={2.5} /> Create post
+            </button>
           </div>
         ) : posts.map(post => {
           const photo    = avatarUrl(post.profile?.photos?.[0] ?? post.profile?.avatar_url);
@@ -467,7 +615,7 @@ export default function FeedPage() {
                   </div>
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 800, color: colors.text }}>{post.profile?.name}</div>
-                    <div style={{ fontSize: 12, color: colors.subtext }}>📍 {post.profile?.location} · {timeAgo(post.created_at)}</div>
+                    <div style={{ fontSize: 12, color: colors.subtext }}>{post.profile?.location} · {timeAgo(post.created_at)}</div>
                   </div>
                 </div>
 
@@ -479,11 +627,17 @@ export default function FeedPage() {
                   )}
                   {isOwner && (
                     <div style={{ position: "relative" }} ref={menuOpenFor === post.id ? menuRef : undefined}>
-                      <button onClick={() => setMenuOpenFor(menuOpenFor === post.id ? null : post.id)} style={{ background: "none", border: "none", fontSize: 18, color: colors.subtext, cursor: "pointer", padding: 4 }}>⋯</button>
+                      <button onClick={() => setMenuOpenFor(menuOpenFor === post.id ? null : post.id)} style={{ background: "none", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 4 }}>
+                        <MoreHorizontal size={19} color={colors.subtext} />
+                      </button>
                       {menuOpenFor === post.id && (
-                        <div style={{ position: "absolute", top: 28, right: 0, background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 12, overflow: "hidden", zIndex: 20, minWidth: 120 }}>
-                          <button onClick={() => startEdit(post)} style={{ width: "100%", textAlign: "left", background: "none", border: "none", padding: "10px 14px", fontSize: 13, color: colors.text, cursor: "pointer" }}>✏️ Edit</button>
-                          <button onClick={() => deletePost(post)} style={{ width: "100%", textAlign: "left", background: "none", border: "none", padding: "10px 14px", fontSize: 13, color: "#FF3366", cursor: "pointer" }}>🗑️ Delete</button>
+                        <div style={{ position: "absolute", top: 28, right: 0, background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 12, overflow: "hidden", zIndex: 20, minWidth: 140 }}>
+                          <button onClick={() => startEdit(post)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, textAlign: "left", background: "none", border: "none", padding: "10px 14px", fontSize: 13, color: colors.text, cursor: "pointer" }}>
+                            <Pencil size={14} /> Edit
+                          </button>
+                          <button onClick={() => deletePost(post)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, textAlign: "left", background: "none", border: "none", padding: "10px 14px", fontSize: 13, color: "#FF3366", cursor: "pointer" }}>
+                            <Trash2 size={14} /> Delete
+                          </button>
                         </div>
                       )}
                     </div>
@@ -496,15 +650,16 @@ export default function FeedPage() {
                   <p style={{ fontSize: 16, color: "#fff", lineHeight: 1.6, fontWeight: 500, fontStyle: "italic" }}>"{post.caption}"</p>
                 </div>
               ) : media ? (
-                <div style={{ margin: "0 16px 12px", borderRadius: 18, overflow: "hidden", height: 280, background: colors.card }}>
-                  {post.type === "video"
-                    ? <video src={media} style={{ width: "100%", height: "100%", objectFit: "cover" }} controls />
-                    : <img src={media} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
-                  }
-                </div>
+                <PostMedia
+                  isVideo={post.type === "video"}
+                  media={media}
+                  colors={colors}
+                  liked={post.user_liked}
+                  onDoubleLike={() => toggleLike(post)}
+                />
               ) : (
-                <div style={{ margin: "0 16px 12px", borderRadius: 18, background: colors.card, height: 200, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span style={{ fontSize: 64 }}>📷</span>
+                <div style={{ margin: "0 16px 12px", borderRadius: 18, background: colors.card, aspectRatio: "4 / 5", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <ImageIcon size={40} color={colors.subtext} />
                 </div>
               )}
 
@@ -517,28 +672,20 @@ export default function FeedPage() {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 16px 14px" }}>
                 <div style={{ display: "flex", gap: 20 }}>
                   <button onClick={() => toggleLike(post)} style={{ background: "none", border: "none", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                    <span style={{ fontSize: 20 }}>{post.user_liked ? "❤️" : "🤍"}</span>
+                    <Heart size={22} color={post.user_liked ? "#FF3366" : colors.subtext} fill={post.user_liked ? "#FF3366" : "none"} />
                     <span style={{ fontSize: 13, fontWeight: 600, color: post.user_liked ? "#FF3366" : colors.subtext }}>{post.likes_count.toLocaleString()}</span>
                   </button>
                   <button onClick={() => openComments(post.id)} style={{ background: "none", border: "none", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                    <span style={{ fontSize: 20 }}>💬</span>
+                    <MessageCircle size={22} color={colors.subtext} />
                     <span style={{ fontSize: 13, fontWeight: 600, color: colors.subtext }}>{post.comments_count.toLocaleString()}</span>
                   </button>
                   <button onClick={() => sharePost(post)} style={{ background: "none", border: "none", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                    <span style={{ fontSize: 20 }}>↗️</span>
+                    <Share2 size={20} color={colors.subtext} />
                   </button>
                 </div>
-                <button
-                  onClick={() => toggleSave(post)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    fontSize: 20,
-                    cursor: "pointer",
-                    opacity: post.user_saved ? 1 : 0.35,
-                    filter: post.user_saved ? "none" : "grayscale(1)",
-                  }}
-                >📌</button>
+                <button onClick={() => toggleSave(post)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center" }}>
+                  <Bookmark size={22} color={post.user_saved ? colors.accent : colors.subtext} fill={post.user_saved ? colors.accent : "none"} />
+                </button>
               </div>
 
               {commenting === post.id && (
@@ -578,8 +725,10 @@ export default function FeedPage() {
                     <button
                       onClick={() => submitComment(post)}
                       disabled={!commentDraft.trim() || commentSubmitting}
-                      style={{ width: 40, height: 40, borderRadius: "50%", background: "#D4AF37", border: "none", fontSize: 16, cursor: commentDraft.trim() ? "pointer" : "not-allowed", opacity: commentDraft.trim() ? 1 : 0.5, display: "flex", alignItems: "center", justifyContent: "center", color: "#000", fontWeight: 700 }}
-                    >↑</button>
+                      style={{ width: 40, height: 40, borderRadius: "50%", background: "#D4AF37", border: "none", cursor: commentDraft.trim() ? "pointer" : "not-allowed", opacity: commentDraft.trim() ? 1 : 0.5, display: "flex", alignItems: "center", justifyContent: "center" }}
+                    >
+                      <ArrowUp size={17} color="#000" strokeWidth={2.5} />
+                    </button>
                   </div>
                 </div>
               )}
