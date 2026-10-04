@@ -1066,7 +1066,20 @@ export default function FeedPage() {
       <Header />
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center", color: colors.subtext }}>
-          <div className="soul-anim" style={{ width: 32, height: 32, border: `3px solid ${colors.border}`, borderTopColor: GOLD, borderRadius: "50%", margin: "0 auto 16px", animation: "spin 0.8s linear infinite" }} />
+          <div
+  className="soul-anim"
+  style={{
+    width: 32,
+    height: 32,
+    borderWidth: 3,
+    borderStyle: "solid",
+    borderColor: colors.border,
+    borderTopColor: GOLD,
+    borderRadius: "50%",
+    margin: "0 auto 16px",
+    animation: "spin 0.8s linear infinite",
+  }}
+/>
           <div style={{ fontSize: 14 }}>Opening the stream…</div>
         </div>
       </div>
