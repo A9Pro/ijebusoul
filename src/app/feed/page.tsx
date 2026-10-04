@@ -39,7 +39,7 @@ const CULTURE_TAGS: [string, string][] = [
   ["Language", "language"], ["Festival", "festival"], ["Fashion", "fashion"], ["Tradition", "tradition"],
 ];
 const ALL_CULTURE = ["culture", ...CULTURE_TAGS.map(t => t[1])];
-const hasTag = (caption: string, tag: string) => new RegExp(`#${tag}\\b`, "i").test(caption);
+const hasTag = (caption: string | null | undefined, tag: string) => new RegExp(`#${tag}\\b`, "i").test(caption ?? "");
 
 function Caption({ text, sig }: { text: string; sig: string }) {
   return (
@@ -118,6 +118,8 @@ interface SoulPostProps {
 
 function SoulPost(p: SoulPostProps) {
   const { post } = p;
+  // caption can be undefined/null in the Post type, so default it once here
+  const caption = post.caption ?? "";
   const photo = avatarUrl(post.profile?.photos?.[0] ?? post.profile?.avatar_url);
   const media = postMediaUrl(post.media_url);
   const isVideo = post.type === "video";
@@ -242,8 +244,8 @@ function SoulPost(p: SoulPostProps) {
 
         {isText && (
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 30px", pointerEvents: "none" }}>
-            <p style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontStyle: "italic", fontSize: post.caption.length > 120 ? 21 : 28, lineHeight: 1.45, color: "#fff", textAlign: "center", textShadow: "0 2px 18px rgba(0,0,0,0.45)" }}>
-              “<Caption text={post.caption} sig={sig} />”
+            <p style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontStyle: "italic", fontSize: caption.length > 120 ? 21 : 28, lineHeight: 1.45, color: "#fff", textAlign: "center", textShadow: "0 2px 18px rgba(0,0,0,0.45)" }}>
+              “<Caption text={caption} sig={sig} />”
             </p>
           </div>
         )}
@@ -344,9 +346,9 @@ function SoulPost(p: SoulPostProps) {
 
         {/* caption, who felt it, actions */}
         <div style={{ position: "absolute", left: 14, right: 14, bottom: 14, zIndex: 2, pointerEvents: "none" }}>
-          {!isText && post.caption && (
+          {!isText && caption && (
             <p style={{ fontSize: 14, lineHeight: 1.5, color: "rgba(255,255,255,0.94)", marginBottom: 10, textShadow: "0 1px 8px rgba(0,0,0,0.7)", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-              <Caption text={post.caption} sig={sig} />
+              <Caption text={caption} sig={sig} />
             </p>
           )}
 
@@ -1038,7 +1040,7 @@ export default function FeedPage() {
   else if (tab === "places" && place) base = posts.filter(p => p.profile?.location === place);
   else if (tab === "culture") {
     const tags = cultureTag ? [cultureTag] : ALL_CULTURE;
-    base = posts.filter(p => tags.some(t => hasTag(p.caption ?? "", t)));
+    base = posts.filter(p => tags.some(t => hasTag(p.caption, t)));
   }
   const visible = personFilter ? base.filter(p => p.user_id === personFilter.id) : base;
 
@@ -1192,7 +1194,7 @@ export default function FeedPage() {
         {tab === "culture" && (
           <div className="soul-scroll" style={{ display: "flex", gap: 8, overflowX: "auto", marginTop: 10, paddingBottom: 2 }}>
             {([["All culture", ""], ...CULTURE_TAGS] as [string, string][]).map(([label, tag]) => {
-              const count = tag ? posts.filter(p => hasTag(p.caption ?? "", tag)).length : posts.filter(p => ALL_CULTURE.some(t => hasTag(p.caption ?? "", t))).length;
+              const count = tag ? posts.filter(p => hasTag(p.caption, tag)).length : posts.filter(p => ALL_CULTURE.some(t => hasTag(p.caption, t))).length;
               const active = (cultureTag ?? "") === tag;
               return (
                 <button key={tag || "all"} onClick={() => setCultureTag(tag || null)} style={{ flexShrink: 0, background: active ? GOLD : "rgba(255,255,255,0.08)", border: "none", borderRadius: 50, padding: "6px 13px", fontSize: 12, fontWeight: 700, color: active ? "#000" : "#fff", cursor: "pointer" }}>
@@ -1276,4 +1278,4 @@ export default function FeedPage() {
       <BottomNav />
     </main>
   );
-} 
+}
