@@ -1,12 +1,24 @@
 import { supabase } from "@/lib/supabase";
 
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
-  return outputArray;
+// Cleans stray quotes/spaces from the env value and explains problems in plain words.
+function urlBase64ToUint8Array(input: string) {
+  const clean = input.trim().replace(/^["']|["']$/g, "").replace(/\s+/g, "");
+
+  const padding = "=".repeat((4 - (clean.length % 4)) % 4);
+  const base64 = (clean + padding).replace(/-/g, "+").replace(/_/g, "/");
+
+  let raw: string;
+  try {
+    raw = atob(base64);
+  } catch {
+    throw new Error(
+      "NEXT_PUBLIC_VAPID_PUBLIC_KEY is not a valid key. Copy the Public Key again from `npx web-push generate-vapid-keys`."
+    );
+  }
+
+  const output = new Uint8Array(new ArrayBuffer(raw.length));
+  for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i);
+  return output;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -26,6 +38,15 @@ export async function subscribeToPush(userId: string): Promise<boolean> {
   if (!pushSupported()) return false;
 
   try {
+    const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    if (!vapidPublicKey) {
+      console.error("Missing NEXT_PUBLIC_VAPID_PUBLIC_KEY. Add it to .env.local and to Vercel, then restart/redeploy.");
+      return false;
+    }
+
+    // Decode first: a bad key fails here with a clear message, before any permission prompt.
+    const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey);
+
     const permission = await Notification.requestPermission();
     if (permission !== "granted") return false;
 
@@ -37,18 +58,12 @@ export async function subscribeToPush(userId: string): Promise<boolean> {
 
     await withTimeout(navigator.serviceWorker.ready, 10000, "Service worker activation");
 
-    const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-    if (!vapidPublicKey) {
-      console.error("Missing NEXT_PUBLIC_VAPID_PUBLIC_KEY");
-      return false;
-    }
-
     let subscription = await registration.pushManager.getSubscription();
     if (!subscription) {
       subscription = await withTimeout(
         registration.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+          applicationServerKey,
         }),
         10000,
         "Push subscription"
