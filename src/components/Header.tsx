@@ -10,13 +10,14 @@ import type { Profile } from "@/lib/types";
 interface NotificationRow {
   id: string;
   actor_id: string | null;
-  type: "post_like" | "post_comment" | "swipe_like" | "match" | "message" | "follow" | "invite_prompt" | "referral_joined" | "referral_reward";
+  // string, not a fixed list: the database may hold types this component doesn't know yet
+  type: string;
   read: boolean;
   created_at: string;
   actor?: Profile | null;
 }
 
-const COPY: Record<NotificationRow["type"], (name: string) => string> = {
+const COPY: Record<string, (name: string) => string> = {
   post_like:       (n) => `${n} liked your post`,
   post_comment:    (n) => `${n} commented on your post`,
   swipe_like:      (n) => `${n} liked your profile`,
@@ -28,18 +29,24 @@ const COPY: Record<NotificationRow["type"], (name: string) => string> = {
   referral_reward: ()  => `You earned 7 days Premium — 3 friends joined through your invites! 🎁`,
 };
 
-const ICON: Record<NotificationRow["type"], string> = {
+const ICON: Record<string, string> = {
   post_like: "❤️", post_comment: "💬", swipe_like: "💛",
   match: "🎉", message: "✉️", follow: "➕",
   invite_prompt: "🎁", referral_joined: "🤝", referral_reward: "🎉",
 };
 
+// An unknown type still renders instead of crashing every page that shows the header.
+const copyFor = (type: string, name: string) =>
+  (COPY[type] ?? ((n: string) => `${n} has new activity`))(name);
+const iconFor = (type: string) => ICON[type] ?? "🔔";
+
 const timeAgo = (iso: string) => {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (Number.isNaN(mins)) return "";
   if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m`;
-  if (mins < 1440) return `${Math.floor(mins / 60)}h`;
-  return `${Math.floor(mins / 1440)}d`;
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1440) return `${Math.floor(mins / 60)}h ago`;
+  return `${Math.floor(mins / 1440)}d ago`;
 };
 
 export default function Header() {
@@ -95,13 +102,14 @@ export default function Header() {
     if (!opening || !user) return;
 
     setNotifLoading(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("notifications")
       .select("*, actor:profiles!notifications_actor_id_fkey(*)")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(5);
-    setNotifications((data as NotificationRow[]) ?? []);
+    if (error) console.error("Header notifications load failed:", error);
+    setNotifications(Array.isArray(data) ? (data as NotificationRow[]) : []);
     setNotifLoading(false);
 
     if (unreadCount > 0) {
@@ -145,7 +153,7 @@ export default function Header() {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
 
           <div ref={notifRef} style={{ position: "relative" }}>
-            <button onClick={openNotifications} style={{
+            <button onClick={openNotifications} aria-label="Notifications" style={{
               width: 36, height: 36, borderRadius: "50%",
               background: colors.card, border: `1px solid ${colors.border}`,
               display: "flex", alignItems: "center", justifyContent: "center",
@@ -194,11 +202,11 @@ export default function Header() {
                           onClick={() => n.actor && setPreviewProfile(n.actor)}
                           style={{ width: 32, height: 32, borderRadius: "50%", background: colors.bg, overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: n.actor ? "pointer" : "default" }}
                         >
-                          {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : <span>{ICON[n.type]}</span>}
+                          {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : <span>{iconFor(n.type)}</span>}
                         </div>
                         <div onClick={() => goToTarget(n)} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
-                          <div style={{ fontSize: 12.5, color: colors.text, lineHeight: 1.4 }}>{COPY[n.type](name)}</div>
-                          <div style={{ fontSize: 10, color: colors.subtext, marginTop: 2 }}>{timeAgo(n.created_at)} ago</div>
+                          <div style={{ fontSize: 12.5, color: colors.text, lineHeight: 1.4 }}>{copyFor(n.type, name)}</div>
+                          <div style={{ fontSize: 10, color: colors.subtext, marginTop: 2 }}>{timeAgo(n.created_at)}</div>
                         </div>
                       </div>
                     );
@@ -217,7 +225,7 @@ export default function Header() {
           </div>
 
           <div ref={themeRef} style={{ position: "relative" }}>
-            <button onClick={() => { setThemeOpen(!themeOpen); setNotifOpen(false); }} style={{
+            <button onClick={() => { setThemeOpen(!themeOpen); setNotifOpen(false); }} aria-label="Change theme" style={{
               height: 36, display: "flex", alignItems: "center", gap: 5,
               padding: "0 12px", borderRadius: 50, background: colors.card,
               border: `1px solid ${colors.border}`, color: colors.text,
@@ -251,7 +259,7 @@ export default function Header() {
             )}
           </div>
 
-          <button onClick={() => router.push("/profile")} style={{
+          <button onClick={() => router.push("/profile")} aria-label="Profile" style={{
             width: 36, height: 36, borderRadius: "50%", background: colors.card,
             border: `1px solid ${colors.border}`, display: "flex", alignItems: "center",
             justifyContent: "center", fontSize: 15, cursor: "pointer",
