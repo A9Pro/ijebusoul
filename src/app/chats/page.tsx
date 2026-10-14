@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, avatarUrl, postMediaUrl } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
@@ -7,6 +7,7 @@ import BottomNav, { BOTTOM_NAV_HEIGHT } from "@/components/BottomNav";
 import Header from "@/components/Header";
 import ProfilePreviewModal from "@/components/ProfilePreviewModal";
 import { Icon, Silhouette, type IconName } from "@/components/SoulIcons";
+import { buildStrips } from "@/components/SoulCloth";
 import type { Match, Message, Profile } from "@/lib/types";
 import { ArrowLeft, ArrowUp, Mic, Image as ImageIcon, Plus, X, Play, Pause, ChevronDown, CornerUpLeft, Copy, MapPin } from "lucide-react";
 
@@ -29,6 +30,38 @@ function hash(str: string) {
 }
 const sigOf = (id?: string) => SIGNATURES[hash(id ?? "x") % SIGNATURES.length];
 const isOnline = (p?: Profile | null) => !!p?.online_at && Date.now() - new Date(p.online_at).getTime() < 300000;
+
+// ── The Loom: every pairing of two people weaves its own, unique thread ──
+// Order-independent so it's the same thread from either side of the conversation.
+function pairSeed(a?: string, b?: string) {
+  return [a ?? "a", b ?? "b"].sort().join("|");
+}
+// How woven a conversation is: older, more active, more recently alive = richer cloth.
+function conversationGrowth(m: Pick<Match, "created_at" | "last_message" | "last_message_at">): number {
+  const now = Date.now();
+  const ageDays = (now - new Date(m.created_at).getTime()) / 86400000;
+  const hasConvo = !!m.last_message;
+  const sinceLast = m.last_message_at ? now - new Date(m.last_message_at).getTime() : Infinity;
+  const recentBoost = sinceLast < 86400000 ? 0.3 : sinceLast < 7 * 86400000 ? 0.15 : 0;
+  const ageFactor = Math.min(1, ageDays / 30);
+  const base = hasConvo ? 0.35 : 0.08;
+  return Math.max(0.05, Math.min(1, base + ageFactor * 0.4 + recentBoost));
+}
+// Lagos time of day sets the room's ambient light, not just a fixed palette.
+function lagosHour(): number {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Lagos", hour: "2-digit", hour12: false }).formatToParts(new Date());
+  const h = Number(parts.find(p => p.type === "hour")?.value ?? "12");
+  return Number.isNaN(h) ? 12 : h;
+}
+function ambientShellBackground(hour: number): string {
+  if (hour >= 21 || hour < 5) {
+    return "radial-gradient(80% 38% at 95% 6%, rgba(112,92,205,0.16), transparent 70%), radial-gradient(70% 40% at 0% 70%, rgba(40,40,80,0.22), transparent 70%), #05050a";
+  }
+  if (hour >= 17) {
+    return "radial-gradient(80% 38% at 95% 6%, rgba(224,138,46,0.18), transparent 70%), radial-gradient(70% 40% at 0% 70%, rgba(184,65,43,0.14), transparent 70%), #0a0705";
+  }
+  return "radial-gradient(80% 38% at 95% 6%, rgba(212,175,55,0.12), transparent 70%), radial-gradient(70% 40% at 0% 70%, rgba(112,92,205,0.13), transparent 70%), #07070c";
+}
 
 type MatchX = Match & { consent_user1?: boolean; consent_user2?: boolean };
 
@@ -131,6 +164,9 @@ const CSS = `
   .ch-row:hover { background: rgba(255,255,255,0.03); }
   .ch-row:active { background: rgba(255,255,255,0.06); }
   .ch-row:focus-visible, .ch-tap:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+  .thread-card { transition: transform 0.2s cubic-bezier(.2,.8,.2,1); }
+  .thread-card:active { transform: scale(0.98); }
+  .thread-card:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
   .ch-btn { transition: transform 0.2s ease, filter 0.25s ease, opacity 0.25s ease, background 0.25s ease; cursor: pointer; }
   .ch-btn:hover:not(:disabled) { filter: brightness(1.1); }
   .ch-btn:active:not(:disabled) { transform: scale(0.94); }
@@ -145,14 +181,13 @@ const CSS = `
   .ch-input::placeholder { font-family: ${SERIF}; font-style: italic; font-size: 16px; color: rgba(255,255,255,0.4); }
   .ch-field::placeholder { color: rgba(255,255,255,0.35); }
   @media (prefers-reduced-motion: reduce) {
-    .ch-rise, .ch-msg, .ch-skel, .ch-dot, .ch-spin, .ch-spin-rev, .ch-sheet, .ch-bar, .ch-flash, .ch-typing span, .ch-recdot { animation: none !important; }
+    .ch-rise, .ch-msg, .ch-skel, .ch-dot, .ch-spin, .ch-spin-rev, .ch-sheet, .ch-bar, .ch-flash, .ch-typing span, .ch-recdot, .thread-card { animation: none !important; transition: none !important; }
   }
 `;
 
-const shell: React.CSSProperties = {
+const shellBase: React.CSSProperties = {
   height: "100dvh", width: "100%", maxWidth: 430, margin: "0 auto", position: "relative", overflow: "hidden",
   display: "flex", flexDirection: "column", fontFamily: "system-ui, -apple-system, sans-serif", color: "#fff",
-  background: "radial-gradient(80% 38% at 95% 6%, rgba(212,175,55,0.12), transparent 70%), radial-gradient(70% 40% at 0% 70%, rgba(112,92,205,0.13), transparent 70%), #07070c",
 };
 const glass: React.CSSProperties = {
   display: "flex", alignItems: "center", justifyContent: "center",
@@ -166,15 +201,41 @@ function Grain() {
   return <div aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none", opacity: 0.05, mixBlendMode: "overlay", backgroundImage: GRAIN }} />;
 }
 
-function Avatar({ src, size, sig, online, ring, glow = 0 }: { src?: string | null; size: number; sig: string; online?: boolean; ring?: "gold" | "soft"; glow?: number }) {
-  const dot = Math.max(10, Math.round(size * 0.2));
+// The avatar ring is no longer a flat gold circle: it's tinted to the thread's
+// own colour and, with `pulse`, breathes gently — that breathing is presence now.
+// No status dot anywhere in this file; warmth replaces it.
+function Avatar({ src, size, sig, ring, glow = 0, ringRGB, pulse }: {
+  src?: string | null; size: number; sig: string;
+  ring?: "gold" | "soft" | "pair"; glow?: number; ringRGB?: string; pulse?: boolean;
+}) {
+  const rc = ringRGB ?? "212,175,55";
+  const showRing = ring === "gold" || ring === "pair";
   return (
     <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
-      {ring === "gold" && <div style={{ position: "absolute", inset: -5, borderRadius: "50%", border: `1px solid rgba(212,175,55,${0.4 + glow * 0.5})`, boxShadow: glow ? `0 0 ${10 + glow * 26}px rgba(212,175,55,${0.15 + glow * 0.5})` : "none", transition: "all 0.8s" }} />}
-      <div style={{ position: "relative", width: "100%", height: "100%", borderRadius: "50%", overflow: "hidden", background: "#111", border: ring === "gold" ? `1.5px solid ${GOLD}` : "1px solid rgba(255,255,255,0.18)", boxShadow: ring === "gold" ? "0 0 24px rgba(212,175,55,0.3)" : "none" }}>
+      {showRing && (
+        <div
+          className={pulse ? "ch-dot" : undefined}
+          style={{ position: "absolute", inset: -5, borderRadius: "50%", border: `1px solid rgba(${rc},${0.4 + glow * 0.5})`, boxShadow: glow ? `0 0 ${10 + glow * 26}px rgba(${rc},${0.15 + glow * 0.5})` : "none", transition: "all 0.8s" }}
+        />
+      )}
+      <div style={{ position: "relative", width: "100%", height: "100%", borderRadius: "50%", overflow: "hidden", background: "#111", border: showRing ? `1.5px solid rgb(${rc})` : "1px solid rgba(255,255,255,0.18)", boxShadow: showRing ? `0 0 24px rgba(${rc},0.3)` : "none" }}>
         {src ? <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <Silhouette sig={sig} />}
       </div>
-      {online && <span style={{ position: "absolute", right: 0, bottom: 0, width: dot, height: dot, borderRadius: "50%", background: ONLINE, border: "2px solid #07070c", boxShadow: `0 0 8px ${ONLINE}` }} />}
+    </div>
+  );
+}
+
+// A small woven chip unique to the two of you, grown from your combined thread.
+// Faint for a brand new match, more vivid the more you've spoken.
+function PairSigil({ seed, growth = 0.4, size }: { seed: string; growth?: number; size?: number }) {
+  const bg = useMemo(() => buildStrips(seed, 1)[0], [seed]);
+  const rgb = SIGNATURES[hash(seed) % SIGNATURES.length];
+  const s = size ?? Math.round(24 + growth * 16);
+  const wash = 0.35 + growth * 0.5;
+  return (
+    <div aria-hidden title="Your woven thread" style={{ position: "relative", width: s, height: s, flexShrink: 0, transform: "rotate(8deg)" }}>
+      <div style={{ position: "absolute", inset: 0, borderRadius: 9, backgroundImage: bg, backgroundSize: "180% 180%", opacity: wash }} />
+      <div style={{ position: "absolute", inset: 0, borderRadius: 9, border: `1px solid rgba(${rgb},0.6)`, boxShadow: `0 0 ${8 + growth * 14}px rgba(${rgb},0.4)` }} />
     </div>
   );
 }
@@ -427,6 +488,11 @@ function Conversation({ match, user, myProfile, onBack, onRead, onBump, onMatchP
   const sig = sigOf(other?.id);
   const otherName = other?.name ?? "them";
 
+  // The thread's own identity: a colour and a woven chip belonging to this pairing alone.
+  const pairKey = pairSeed(user.id, other?.id);
+  const pairRGB = SIGNATURES[hash(pairKey) % SIGNATURES.length];
+  const ambient = useMemo(() => ambientShellBackground(lagosHour()), []);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -529,6 +595,8 @@ function Conversation({ match, user, myProfile, onBack, onRead, onBump, onMatchP
   const recent = visible.filter(x => Date.now() - new Date(x.m.created_at).getTime() < 24 * 3600000);
   const bothSpoke = new Set(recent.map(x => x.m.sender_id)).size > 1;
   const glow = Math.min(bothSpoke ? 1 : 0.4, recent.length / 10);
+  // How grown this thread is, from the real message count — feeds the woven sigil.
+  const threadGrowth = Math.max(0.05, Math.min(1, visible.length / 60));
 
   // ── scrolling ──
   const scrollToBottom = (smooth: boolean) => bottomRef.current?.scrollIntoView({ behavior: smooth ? "smooth" : "auto" });
@@ -744,7 +812,7 @@ function Conversation({ match, user, myProfile, onBack, onRead, onBump, onMatchP
   const hasText = draft.trim().length > 0;
 
   return (
-    <main style={shell}>
+    <main style={{ ...shellBase, background: ambient }}>
       <style>{CSS}</style>
       <Grain />
       {previewProfile && <ProfilePreviewModal profile={previewProfile} onClose={() => setPreviewProfile(null)} />}
@@ -761,7 +829,7 @@ function Conversation({ match, user, myProfile, onBack, onRead, onBump, onMatchP
           <ArrowLeft size={18} />
         </button>
         <div className="ch-tap" role="button" tabIndex={0} onClick={() => other && setPreviewProfile(other)} onKeyDown={e => { if (e.key === "Enter" && other) setPreviewProfile(other); }} style={{ display: "flex", alignItems: "center", gap: 13, cursor: "pointer", minWidth: 0 }}>
-          <Avatar src={photo} size={48} sig={sig} online={online || here} ring="gold" glow={glow} />
+          <Avatar src={photo} size={48} sig={sig} ring="pair" ringRGB={pairRGB} glow={online || here ? Math.max(glow, 0.85) : glow} pulse={online || here} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontFamily: SERIF, fontWeight: 600, fontSize: 25, lineHeight: 1.05, letterSpacing: "-0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{otherName}</div>
             <div style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 15, marginTop: 2, display: "flex", alignItems: "center", gap: 6, color: status === "offline" ? "rgba(255,255,255,0.5)" : status === "online" ? "#7ee8ad" : "#f6e08a" }}>
@@ -770,6 +838,8 @@ function Conversation({ match, user, myProfile, onBack, onRead, onBump, onMatchP
             </div>
           </div>
         </div>
+        <div style={{ flex: 1 }} />
+        <PairSigil seed={pairKey} growth={threadGrowth} />
       </div>
       <div style={rule} />
 
@@ -790,7 +860,7 @@ function Conversation({ match, user, myProfile, onBack, onRead, onBump, onMatchP
       <div ref={scrollRef} onScroll={onScroll} className="ch-scroll" style={{ position: "relative", flex: 1, minHeight: 0, overflowY: "auto", padding: "18px 16px 10px", display: "flex", flexDirection: "column", WebkitMaskImage: "linear-gradient(to bottom, transparent 0, #000 20px)", maskImage: "linear-gradient(to bottom, transparent 0, #000 20px)" }}>
         {visible.length === 0 ? (
           <div className="ch-rise" style={{ margin: "auto", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 12, paddingBottom: 30, width: "100%" }}>
-            <Avatar src={photo} size={92} sig={sig} ring="gold" />
+            <Avatar src={photo} size={92} sig={sig} ring="pair" ringRGB={pairRGB} glow={0.3} />
             <h2 style={{ margin: "10px 0 0", fontFamily: SERIF, fontStyle: "italic", fontWeight: 600, fontSize: 30 }}>Say hello to {otherName}</h2>
             <p style={{ margin: "0 0 8px", fontFamily: SERIF, fontStyle: "italic", fontSize: 18, color: "rgba(255,255,255,0.55)", maxWidth: 250, lineHeight: 1.45 }}>Begin with one of these, or write your own.</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: 320 }}>
@@ -976,6 +1046,8 @@ export default function ChatsPage() {
   const [previewProfile, setPreviewProfile] = useState<Profile | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  const ambient = useMemo(() => ambientShellBackground(lagosHour()), []);
+
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2000);
@@ -1038,7 +1110,7 @@ export default function ChatsPage() {
   );
 
   if (authLoading || fetching) return (
-    <main style={shell}>
+    <main style={{ ...shellBase, background: ambient }}>
       <style>{CSS}</style>
       <Header />
       <div style={{ padding: "10px 22px 20px" }}>
@@ -1085,7 +1157,7 @@ export default function ChatsPage() {
     .sort((a, b) => new Date(b.last_message_at ?? 0).getTime() - new Date(a.last_message_at ?? 0).getTime());
 
   return (
-    <main style={shell}>
+    <main style={{ ...shellBase, background: ambient }}>
       <style>{CSS}</style>
       <Grain />
       {toastEl}
@@ -1127,12 +1199,16 @@ export default function ChatsPage() {
                   <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>{fresh.length}</span>
                 </div>
                 <div className="ch-scroll" style={{ display: "flex", gap: 20, overflowX: "auto", padding: "6px 22px 8px" }}>
-                  {fresh.map((m, i) => (
-                    <button key={m.id} className="ch-btn ch-rise" onClick={() => setActiveId(m.id)} aria-label={`Start a conversation with ${m.other_user?.name}`} style={{ background: "none", border: "none", padding: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 10, flexShrink: 0, color: "#fff", animationDelay: `${i * 0.06}s` }}>
-                      <Avatar src={avatarUrl(m.other_user?.photos?.[0] ?? m.other_user?.avatar_url)} size={68} sig={sigOf(m.other_user?.id)} online={isOnline(m.other_user)} ring="gold" />
-                      <span style={{ fontFamily: SERIF, fontStyle: "italic", fontWeight: 600, fontSize: 16, maxWidth: 76, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.other_user?.name}</span>
-                    </button>
-                  ))}
+                  {fresh.map((m, i) => {
+                    const seed = pairSeed(user?.id, m.other_user?.id);
+                    const rgb = SIGNATURES[hash(seed) % SIGNATURES.length];
+                    return (
+                      <button key={m.id} className="ch-btn ch-rise" onClick={() => setActiveId(m.id)} aria-label={`Start a conversation with ${m.other_user?.name}`} style={{ background: "none", border: "none", padding: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 10, flexShrink: 0, color: "#fff", animationDelay: `${i * 0.06}s` }}>
+                        <Avatar src={avatarUrl(m.other_user?.photos?.[0] ?? m.other_user?.avatar_url)} size={68} sig={sigOf(m.other_user?.id)} ring="pair" ringRGB={rgb} glow={0.18} pulse={isOnline(m.other_user)} />
+                        <span style={{ fontFamily: SERIF, fontStyle: "italic", fontWeight: 600, fontSize: 16, maxWidth: 76, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.other_user?.name}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </section>
             )}
@@ -1146,24 +1222,44 @@ export default function ChatsPage() {
                   const photo = avatarUrl(m.other_user?.photos?.[0] ?? m.other_user?.avatar_url);
                   const unread = m.unread_count > 0;
                   const kind = m.last_message ? parseMsg(m.last_message).kind : "text";
+                  const online = isOnline(m.other_user);
+                  const seed = pairSeed(user?.id, m.other_user?.id);
+                  const growth = conversationGrowth(m);
+                  const ringRGB = SIGNATURES[hash(seed) % SIGNATURES.length];
+                  const weave = buildStrips(seed, 1)[0];
+                  const wash = 0.08 + growth * 0.26;
+                  const glow = online ? 0.95 : 0.25 + growth * 0.35;
                   return (
-                    <div key={m.id} className="ch-row ch-rise" role="button" tabIndex={0} onClick={() => setActiveId(m.id)} onKeyDown={e => { if (e.key === "Enter") setActiveId(m.id); }} style={{ display: "flex", alignItems: "center", gap: 16, padding: "0 22px", animationDelay: `${Math.min(i, 8) * 0.05}s` }}>
-                      <div onClick={e => { e.stopPropagation(); if (m.other_user) setPreviewProfile(m.other_user); }} aria-label={`View ${m.other_user?.name}'s profile`} role="button" style={{ cursor: "pointer", padding: "14px 0" }}>
-                        <Avatar src={photo} size={58} sig={sigOf(m.other_user?.id)} online={isOnline(m.other_user)} ring={unread ? "gold" : "soft"} />
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0, padding: "14px 0", borderBottom: i === convos.length - 1 ? "none" : "1px solid rgba(255,255,255,0.07)" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
-                          <span style={{ fontFamily: SERIF, fontWeight: unread ? 700 : 600, fontSize: 22, lineHeight: 1.1, letterSpacing: "-0.005em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.other_user?.name}</span>
-                          <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 15, flexShrink: 0, color: unread ? "#f6e08a" : "rgba(255,255,255,0.45)", fontWeight: unread ? 700 : 500 }}>{timeAgo(m.last_message_at)}</span>
+                    <div
+                      key={m.id}
+                      className="ch-row ch-rise thread-card"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setActiveId(m.id)}
+                      onKeyDown={e => { if (e.key === "Enter") setActiveId(m.id); }}
+                      style={{ position: "relative", margin: "0 16px 10px", borderRadius: 20, overflow: "hidden", animationDelay: `${Math.min(i, 8) * 0.05}s`, boxShadow: `0 10px 26px -20px rgba(${ringRGB},0.6)` }}
+                    >
+                      {/* the thread itself: a pattern unique to this pairing, more visible the longer you've spoken */}
+                      <span aria-hidden style={{ position: "absolute", inset: 0, backgroundImage: weave, backgroundSize: "160% 160%", opacity: wash }} />
+                      <span aria-hidden style={{ position: "absolute", inset: 0, background: "linear-gradient(100deg, rgba(7,7,12,0.92), rgba(7,7,12,0.8) 55%, rgba(7,7,12,0.94))" }} />
+                      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 16, padding: "14px 16px" }}>
+                        <div onClick={e => { e.stopPropagation(); if (m.other_user) setPreviewProfile(m.other_user); }} aria-label={`View ${m.other_user?.name}'s profile`} role="button" style={{ cursor: "pointer" }}>
+                          <Avatar src={photo} size={56} sig={sigOf(m.other_user?.id)} ring="pair" ringRGB={ringRGB} glow={glow} pulse={online} />
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 5 }}>
-                          <span style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0, fontSize: 13.5, color: unread ? "#fff" : "rgba(255,255,255,0.55)", fontWeight: unread ? 500 : 400, fontStyle: kind === "text" || kind === "reply" ? "normal" : "italic" }}>
-                            {kind === "voice" && <Mic size={13} color={GOLD} />}
-                            {kind === "img" && <ImageIcon size={13} color={GOLD} />}
-                            {kind === "plan" && <Icon name="later" size={16} />}
-                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{previewOf(m.last_message)}</span>
-                          </span>
-                          {unread && <span style={{ minWidth: 22, height: 22, padding: "0 7px", borderRadius: 50, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: "#1a1204", background: GOLD_BTN, boxShadow: "0 0 12px rgba(212,175,55,0.5)" }}>{m.unread_count}</span>}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+                            <span style={{ fontFamily: SERIF, fontWeight: unread ? 700 : 600, fontSize: 21, lineHeight: 1.1, letterSpacing: "-0.005em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.other_user?.name}</span>
+                            <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 14, flexShrink: 0, color: unread ? "#f6e08a" : "rgba(255,255,255,0.45)", fontWeight: unread ? 700 : 500 }}>{timeAgo(m.last_message_at)}</span>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 5 }}>
+                            <span style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0, fontSize: 13.5, color: unread ? "#fff" : "rgba(255,255,255,0.55)", fontWeight: unread ? 500 : 400, fontStyle: kind === "text" || kind === "reply" ? "normal" : "italic" }}>
+                              {kind === "voice" && <Mic size={13} color={`rgb(${ringRGB})`} />}
+                              {kind === "img" && <ImageIcon size={13} color={`rgb(${ringRGB})`} />}
+                              {kind === "plan" && <Icon name="later" size={16} />}
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{previewOf(m.last_message)}</span>
+                            </span>
+                            {unread && <span style={{ minWidth: 22, height: 22, padding: "0 7px", borderRadius: 50, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: "#1a1204", background: GOLD_BTN, boxShadow: "0 0 12px rgba(212,175,55,0.5)" }}>{m.unread_count}</span>}
+                          </div>
                         </div>
                       </div>
                     </div>
