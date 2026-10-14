@@ -15,6 +15,8 @@ export type Profile = {
   created_at: string;
   referral_code?: string;
   premium_until?: string | null;
+  birth_date?: string | null; // "YYYY-MM-DD"
+  birthday_shoutout?: boolean;
 };
 
 export type Match = {
@@ -41,6 +43,7 @@ export type Post = {
   id: string;
   user_id: string;
   type: "photo" | "video" | "text";
+  kind?: string | null; // "birthday" for automatic birthday shout-outs
   caption?: string;
   media_url?: string | null;
   bg_color?: string;
@@ -51,6 +54,11 @@ export type Post = {
   user_liked: boolean;
   user_following: boolean;
   user_saved: boolean;
+};
+
+export type PublicProfile = Omit<Profile, "age" | "birth_date"> & {
+  birth_month?: number | null;
+  birth_day?: number | null;
 };
 
 export type Notification = {

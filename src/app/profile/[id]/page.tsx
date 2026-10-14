@@ -27,7 +27,8 @@ import {
   sharedThreads,
   type PostLite,
 } from "@/components/ProfileParts";
-import type { Profile } from "@/lib/types";
+import { isBirthdayOnMonthDay, birthdayLabelFromMonthDay } from "@/lib/birthday";
+import type { PublicProfile } from "@/lib/types";
 
 type TabId = "photos" | "posts" | "about";
 type LoadState = "loading" | "ready" | "missing" | "error";
@@ -61,7 +62,7 @@ export default function PublicProfilePage() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const postsRequested = useRef(false);
 
-  const [profile, setProfile]     = useState<Profile | null>(null);
+  const [profile, setProfile]     = useState<PublicProfile | null>(null);
   const [status, setStatus]       = useState<LoadState>("loading");
   const [attempt, setAttempt]     = useState(0);
   const [activeTab, setActiveTab] = useState<TabId>("photos");
@@ -81,7 +82,6 @@ export default function PublicProfilePage() {
 
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
-  /* Moving from one profile to another keeps this component alive, so reset per-profile state. */
   useEffect(() => {
     postsRequested.current = false;
     setPosts([]);
@@ -90,17 +90,17 @@ export default function PublicProfilePage() {
     setCounts({ followers: 0, following: 0, posts: 0 });
   }, [id]);
 
-  /* ── profile ── */
+  /* ── profile (public-safe view: never receives the birth year) ── */
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
     setStatus("loading");
     (async () => {
-      const { data, error } = await supabase.from("profiles").select("*").eq("id", id).maybeSingle();
+      const { data, error } = await supabase.from("public_profiles").select("*").eq("id", id).maybeSingle();
       if (cancelled) return;
       if (error) { console.error("Profile load failed:", error); setStatus("error"); return; }
       if (!data) { setProfile(null); setStatus("missing"); return; }
-      setProfile(data as Profile);
+      setProfile(data as PublicProfile);
       setStatus("ready");
     })();
     return () => { cancelled = true; };
@@ -187,7 +187,6 @@ export default function PublicProfilePage() {
     fontFamily: "system-ui", display: "flex", flexDirection: "column", color: colors.text,
   };
 
-  /* ── states ── */
   if (status === "loading") return (
     <div style={shell}>
       <Header />
@@ -222,7 +221,6 @@ export default function PublicProfilePage() {
     </main>
   );
 
-  /* ── ready ── */
   const photos    = profile.photos ?? [];
   const interests = profile.interests ?? [];
   const mainPic   = avatarUrl(photos[0] ?? profile.avatar_url);
@@ -231,6 +229,7 @@ export default function PublicProfilePage() {
   const presence  = presenceOf(profile.online_at);
   const firstName = (profile.name || "").trim().split(" ")[0] || "them";
   const shared    = isSelf ? [] : sharedThreads(viewer?.interests ?? [], interests);
+  const birthdayToday = !isSelf && isBirthdayOnMonthDay(profile);
 
   const lightboxPhotos: string[] = photos.length
     ? photos.map(p => avatarUrl(p)).filter((u): u is string => !!u)
@@ -276,18 +275,28 @@ export default function PublicProfilePage() {
           <div style={{ marginTop: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900, letterSpacing: "-0.03em", lineHeight: 1.1 }}>
-                {profile.name}{profile.age ? `, ${profile.age}` : ""}
+                {profile.name}{profile.occupation ? `, ${profile.occupation}` : ""}
               </h1>
               {premium && (
                 <span style={{ background: GOLD, color: "#000", borderRadius: 50, padding: "2px 10px", fontSize: 11, fontWeight: 800 }}>Premium</span>
               )}
             </div>
-            {profile.occupation && <p style={{ margin: "6px 0 0", fontSize: 14.5, fontWeight: 600 }}>{profile.occupation}</p>}
             {profile.location && <p style={{ margin: "2px 0 0", fontSize: 13.5, color: colors.subtext }}>{profile.location}</p>}
             <p style={{ margin: "6px 0 0", fontSize: 12.5, fontWeight: 600, color: presence.online ? "#22C55E" : colors.subtext }}>{presence.label}</p>
           </div>
 
           {profile.bio && <p style={{ margin: "14px 0 0", fontSize: 14.5, lineHeight: 1.65, maxWidth: "46ch" }}>{profile.bio}</p>}
+
+          {birthdayToday && (
+            <div style={{ marginTop: 16, borderRadius: 16, padding: "14px 16px", color: "#fff", background: "linear-gradient(135deg, #7a1f3d 0%, #b8412b 60%, #e0a82e 130%)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 900 }}>🎂🎉 It's {firstName}'s birthday today</div>
+                <div style={{ fontSize: 12.5, opacity: 0.92, marginTop: 2 }}>Send some love in the feed.</div>
+              </div>
+              <button type="button" className="sp-btn" onClick={() => router.push("/feed")}
+                style={{ background: "#fff", color: "#7a1f3d", border: 0, borderRadius: 50, padding: "9px 16px", fontSize: 13, fontWeight: 800, cursor: "pointer", flexShrink: 0 }}>Wish them</button>
+            </div>
+          )}
 
           <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 20px", marginTop: 16 }}>
             <StatLink value={counts.followers} label="followers" />
@@ -339,7 +348,7 @@ export default function PublicProfilePage() {
 
           {activeTab === "about" && (
             <AboutList rows={[
-              { label: "Age",          value: profile.age ? `${profile.age} years old` : "—" },
+              { label: "Birthday",     value: birthdayLabelFromMonthDay(profile.birth_month, profile.birth_day) },
               { label: "Location",     value: profile.location || "—" },
               { label: "Occupation",   value: profile.occupation || "—" },
               { label: "Looking for",  value: capitalize(profile.looking_for) },

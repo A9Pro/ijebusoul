@@ -27,6 +27,8 @@ import {
   shareProfile,
   type PostLite,
 } from "@/components/ProfileParts";
+import BirthdayCard from "@/components/BirthdayCard";
+import { isBirthdayToday, latestAdultBirthDate, parseBirthDate, ageFromBirthDate, validateBirthDate } from "@/lib/birthday";
 import type { Profile } from "@/lib/types";
 
 const INTEREST_SUGGESTIONS = ["Suya lover", "Owanbe ready", "AFC Ijebu", "Egusi connoisseur", "Owambe DJ", "Yoruba culture", "Beach trips", "Deep convos", "Food lover", "Music head"];
@@ -37,12 +39,22 @@ const MAX_INTERESTS = 12;
 const BIO_MAX = 300;
 
 type TabId = "photos" | "posts" | "about";
-type Draft = { name: string; age: string; location: string; occupation: string; bio: string; interests: string[] };
+type Draft = {
+  name: string; age: string; location: string; occupation: string; bio: string; interests: string[];
+  birthDate: string;   // "YYYY-MM-DD" or ""
+  shoutout: boolean;   // post a birthday shout-out for me
+};
+
+function birthdayLabel(iso?: string | null): string {
+  const b = parseBirthDate(iso);
+  if (!b) return "—";
+  return new Date(2000, b.m - 1, b.d).toLocaleDateString(undefined, { day: "numeric", month: "long" });
+}
 
 export default function ProfilePage() {
   const router = useRouter();
   const { user, profile, loading: authLoading, signOut, refreshProfile } = useAuth();
-  const { colors } = useTheme();
+  const { theme, colors } = useTheme();
   const uid = user?.id;
 
   const fileRef = useRef<HTMLInputElement>(null);
@@ -215,6 +227,8 @@ export default function ProfilePage() {
       occupation: profile.occupation ?? "",
       bio:        profile.bio ?? "",
       interests:  [...(profile.interests ?? [])],
+      birthDate:  profile.birth_date ?? "",
+      shoutout:   profile.birthday_shoutout !== false,
     });
     setFormError("");
     setNewInterest("");
@@ -236,28 +250,63 @@ export default function ProfilePage() {
   const saveEdit = async () => {
     if (!uid || !draft) return;
 
-    const name = draft.name.trim();
-    const age  = Number(draft.age);
-    if (!name)                                   { setFormError("Enter your name."); return; }
-    if (!Number.isInteger(age) || age < 18 || age > 99) { setFormError("Age must be a number between 18 and 99."); return; }
-    if (draft.bio.length > BIO_MAX)              { setFormError(`Your bio can be up to ${BIO_MAX} characters.`); return; }
+    const name      = draft.name.trim();
+    const birthDate = draft.birthDate.trim();
+    let age         = Number(draft.age);
+    if (!name) { setFormError("Enter your name."); return; }
+    if (birthDate) {
+      const birthError = validateBirthDate(birthDate);
+      if (birthError) { setFormError(birthError); return; }
+      age = ageFromBirthDate(birthDate) ?? age;   // age is worked out from the birthday
+    } else if (!Number.isInteger(age) || age < 18 || age > 99) {
+      setFormError("Age must be a number between 18 and 99.");
+      return;
+    }
+    if (draft.bio.length > BIO_MAX) { setFormError(`Your bio can be up to ${BIO_MAX} characters.`); return; }
 
-    setSaving(true);
-    setFormError("");
-    const { error } = await supabase.from("profiles").update({
+    // Only send the birthday columns when they changed, so saving still works before birthdays.sql has been run.
+    const birthChanged =
+      birthDate !== (profile?.birth_date ?? "") ||
+      draft.shoutout !== (profile?.birthday_shoutout !== false);
+
+    const payload: Record<string, unknown> = {
       name,
       age,
       location:   draft.location.trim(),
       occupation: draft.occupation.trim(),
       bio:        draft.bio.trim(),
       interests:  draft.interests,
-    }).eq("id", uid);
+    };
+    if (birthChanged) {
+      payload.birth_date        = birthDate || null;
+      payload.birthday_shoutout = draft.shoutout;
+    }
+
+    setSaving(true);
+    setFormError("");
+    const { error } = await supabase.from("profiles").update(payload).eq("id", uid);
 
     if (error) {
-      console.error("Saving profile failed:", error);
-      setFormError("Your changes weren't saved. Check your connection and try again.");
+      console.error("Saving profile failed:", {
+        message: error.message,
+        code: (error as any).code,
+        details: (error as any).details,
+        hint: (error as any).hint,
+        name: (error as any).name,
+      });
+      setFormError(
+        /birth/i.test(error.message ?? "")
+          ? "Birthdays aren't set up yet. Run supabase/birthdays.sql in Supabase first."
+          : `Your changes weren't saved: ${error.message || "unknown error"}`
+      );
       setSaving(false);
       return;
+    }
+
+    // Birthday is today: make the shout-out now instead of waiting for tonight's job.
+    if (birthDate && draft.shoutout && isBirthdayToday({ birth_date: birthDate, birthday_shoutout: draft.shoutout })) {
+      const { error: postError } = await supabase.rpc("create_my_birthday_post");
+      if (postError) console.error("Birthday shout-out failed:", postError);
     }
     await refreshProfile();
     setSaving(false);
@@ -357,8 +406,33 @@ export default function ProfilePage() {
           <input id="pf-name" maxLength={40} value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} style={inputStyle} />
         </div>
         <div>
-          <label htmlFor="pf-age" style={labelStyle}>Age</label>
-          <input id="pf-age" inputMode="numeric" maxLength={2} value={draft.age} onChange={e => setDraft({ ...draft, age: e.target.value.replace(/\D/g, "") })} style={inputStyle} />
+          <label htmlFor="pf-birth" style={labelStyle}>Birthday</label>
+          <input
+            id="pf-birth"
+            type="date"
+            min="1900-01-01"
+            max={latestAdultBirthDate()}
+            value={draft.birthDate}
+            onChange={e => {
+              const v = e.target.value;
+              const worked = v ? ageFromBirthDate(v) : null;
+              setDraft({ ...draft, birthDate: v, age: worked !== null && worked >= 0 ? String(worked) : draft.age });
+            }}
+            style={{ ...inputStyle, colorScheme: theme === "light" ? "light" : "dark" }}
+          />
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 10, marginTop: 12, fontSize: 13.5, lineHeight: 1.45, color: colors.text, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={draft.shoutout}
+              onChange={e => setDraft({ ...draft, shoutout: e.target.checked })}
+              style={{ width: 18, height: 18, marginTop: 1, accentColor: GOLD, flexShrink: 0 }}
+            />
+            <span>Post a birthday shout-out for me on my birthday.</span>
+          </label>
+        </div>
+        <div>
+          <label htmlFor="pf-age" style={labelStyle}>Age{draft.birthDate ? " (worked out from your birthday)" : ""}</label>
+          <input id="pf-age" inputMode="numeric" maxLength={2} readOnly={!!draft.birthDate} value={draft.age} onChange={e => setDraft({ ...draft, age: e.target.value.replace(/\D/g, "") })} style={{ ...inputStyle, opacity: draft.birthDate ? 0.7 : 1 }} />
         </div>
         <div>
           <label htmlFor="pf-loc" style={labelStyle}>Location</label>
@@ -484,13 +558,12 @@ export default function ProfilePage() {
           <div style={{ marginTop: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900, letterSpacing: "-0.03em", lineHeight: 1.1 }}>
-                {profile.name}{profile.age ? `, ${profile.age}` : ""}
+                {profile.name}{profile.occupation ? `, ${profile.occupation}` : ""}
               </h1>
               {premium && (
                 <span style={{ background: GOLD, color: "#000", borderRadius: 50, padding: "2px 10px", fontSize: 11, fontWeight: 800 }}>Premium</span>
               )}
             </div>
-            {profile.occupation && <p style={{ margin: "6px 0 0", fontSize: 14.5, fontWeight: 600 }}>{profile.occupation}</p>}
             {profile.location && <p style={{ margin: "2px 0 0", fontSize: 13.5, color: colors.subtext }}>{profile.location}</p>}
             <p style={{ margin: "6px 0 0", fontSize: 12.5, color: "#22C55E", fontWeight: 600 }}>Online now</p>
           </div>
@@ -510,6 +583,23 @@ export default function ProfilePage() {
             <button type="button" className="sp-btn" onClick={handleShare}
               style={{ flex: 1, background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 12, padding: "13px 0", fontSize: 14, fontWeight: 700, color: colors.text, cursor: "pointer" }}>Share profile</button>
           </div>
+
+          {isBirthdayToday(profile) && (
+            <BirthdayCard name={profile.name} userId={profile.id} onMessage={showToast} />
+          )}
+
+          {!profile.birth_date && (
+            <div style={{ marginTop: 18, background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 16, padding: "14px 16px" }}>
+              <div style={{ fontSize: 14, fontWeight: 800 }}>Add your birthday 🎂</div>
+              <p style={{ margin: "4px 0 10px", fontSize: 13.5, lineHeight: 1.45, color: colors.subtext }}>
+                We'll post a shout-out on your day so the community can celebrate you.
+              </p>
+              <button type="button" className="sp-link" onClick={startEdit}
+                style={{ background: "none", border: 0, padding: 0, color: GOLD, fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                Add birthday
+              </button>
+            </div>
+          )}
 
           {percent < 100 && (
             <div style={{ marginTop: 18, background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 16, padding: "14px 16px" }}>
@@ -558,6 +648,7 @@ export default function ProfilePage() {
               { label: "Age",          value: profile.age ? `${profile.age} years old` : "—" },
               { label: "Location",     value: profile.location || "—" },
               { label: "Occupation",   value: profile.occupation || "—" },
+              { label: "Birthday",     value: birthdayLabel(profile.birth_date) },
               { label: "Looking for",  value: capitalize(profile.looking_for) },
               { label: "Gender",       value: capitalize(profile.gender) },
               { label: "Member since", value: memberSince(profile.created_at) },
