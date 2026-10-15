@@ -8,6 +8,8 @@ import Header from "@/components/Header";
 import ProfilePreviewModal from "@/components/ProfilePreviewModal";
 import { Icon, Silhouette, type IconName } from "@/components/SoulIcons";
 import { buildStrips } from "@/components/SoulCloth";
+import StoryViewer from "@/components/StoryViewer";
+import { loadStoryFeed, type StoryFeed } from "@/lib/stories";
 import type { Match, Message, Profile } from "@/lib/types";
 import { ArrowLeft, ArrowUp, Mic, Image as ImageIcon, Plus, X, Play, Pause, ChevronDown, CornerUpLeft, Copy, MapPin } from "lucide-react";
 
@@ -204,14 +206,19 @@ function Grain() {
 // The avatar ring is no longer a flat gold circle: it's tinted to the thread's
 // own colour and, with `pulse`, breathes gently — that breathing is presence now.
 // No status dot anywhere in this file; warmth replaces it.
-function Avatar({ src, size, sig, ring, glow = 0, ringRGB, pulse }: {
+function Avatar({ src, size, sig, ring, glow = 0, ringRGB, pulse, story }: {
   src?: string | null; size: number; sig: string;
   ring?: "gold" | "soft" | "pair"; glow?: number; ringRGB?: string; pulse?: boolean;
+  /** An active story: a bright woven ring when unseen, a quiet one once you've watched it. */
+  story?: "unseen" | "seen" | null;
 }) {
   const rc = ringRGB ?? "212,175,55";
   const showRing = ring === "gold" || ring === "pair";
   return (
     <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      {story && (
+        <div aria-hidden style={{ position: "absolute", inset: -9, borderRadius: "50%", padding: 2.5, background: story === "unseen" ? "conic-gradient(from 200deg, #f6e08a, #D4AF37, #b8412b, #f6e08a)" : "rgba(255,255,255,0.28)", boxShadow: story === "unseen" ? "0 0 18px rgba(212,175,55,0.4)" : "none", WebkitMask: "radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px))", mask: "radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px))" }} />
+      )}
       {showRing && (
         <div
           className={pulse ? "ch-dot" : undefined}
@@ -1045,8 +1052,25 @@ export default function ChatsPage() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [previewProfile, setPreviewProfile] = useState<Profile | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [stories, setStories] = useState<StoryFeed | null>(null);
+  const [storyOpen, setStoryOpen] = useState<{ g: number; s: number } | null>(null);
 
   const ambient = useMemo(() => ambientShellBackground(lagosHour()), []);
+
+  // Who has a live story: lets the inbox light up avatars and open them.
+  const loadStories = () => { if (user) loadStoryFeed(user.id).then(setStories).catch(() => {}); };
+  useEffect(() => { loadStories(); }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const storyState = (id?: string): "unseen" | "seen" | null => {
+    const g = stories?.groups.find(x => x.user.id === id && !x.mine);
+    return g ? (g.hasUnseen ? "unseen" : "seen") : null;
+  };
+  const openStoryOf = (id?: string) => {
+    const gi = stories?.groups.findIndex(x => x.user.id === id) ?? -1;
+    if (!stories || gi < 0) return false;
+    const si = stories.groups[gi].stories.findIndex(s => !s.viewed);
+    setStoryOpen({ g: gi, s: si < 0 ? 0 : si });
+    return true;
+  };
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -1163,6 +1187,13 @@ export default function ChatsPage() {
       {toastEl}
       <Header />
       {previewProfile && <ProfilePreviewModal profile={previewProfile} onClose={() => setPreviewProfile(null)} />}
+      {storyOpen && stories && user && (
+        <StoryViewer
+          groups={stories.groups} startGroup={storyOpen.g} startStory={storyOpen.s} myId={user.id}
+          names={stories.names} matchByUser={stories.matchByUser}
+          onClose={() => { setStoryOpen(null); loadStories(); }}
+        />
+      )}
 
       <div style={{ position: "relative", padding: "6px 22px 0" }}>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
@@ -1204,7 +1235,7 @@ export default function ChatsPage() {
                     const rgb = SIGNATURES[hash(seed) % SIGNATURES.length];
                     return (
                       <button key={m.id} className="ch-btn ch-rise" onClick={() => setActiveId(m.id)} aria-label={`Start a conversation with ${m.other_user?.name}`} style={{ background: "none", border: "none", padding: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 10, flexShrink: 0, color: "#fff", animationDelay: `${i * 0.06}s` }}>
-                        <Avatar src={avatarUrl(m.other_user?.photos?.[0] ?? m.other_user?.avatar_url)} size={68} sig={sigOf(m.other_user?.id)} ring="pair" ringRGB={rgb} glow={0.18} pulse={isOnline(m.other_user)} />
+                        <Avatar src={avatarUrl(m.other_user?.photos?.[0] ?? m.other_user?.avatar_url)} size={68} sig={sigOf(m.other_user?.id)} ring="pair" ringRGB={rgb} glow={0.18} pulse={isOnline(m.other_user)} story={storyState(m.other_user?.id)} />
                         <span style={{ fontFamily: SERIF, fontStyle: "italic", fontWeight: 600, fontSize: 16, maxWidth: 76, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.other_user?.name}</span>
                       </button>
                     );
@@ -1243,8 +1274,8 @@ export default function ChatsPage() {
                       <span aria-hidden style={{ position: "absolute", inset: 0, backgroundImage: weave, backgroundSize: "160% 160%", opacity: wash }} />
                       <span aria-hidden style={{ position: "absolute", inset: 0, background: "linear-gradient(100deg, rgba(7,7,12,0.92), rgba(7,7,12,0.8) 55%, rgba(7,7,12,0.94))" }} />
                       <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 16, padding: "14px 16px" }}>
-                        <div onClick={e => { e.stopPropagation(); if (m.other_user) setPreviewProfile(m.other_user); }} aria-label={`View ${m.other_user?.name}'s profile`} role="button" style={{ cursor: "pointer" }}>
-                          <Avatar src={photo} size={56} sig={sigOf(m.other_user?.id)} ring="pair" ringRGB={ringRGB} glow={glow} pulse={online} />
+                        <div onClick={e => { e.stopPropagation(); if (openStoryOf(m.other_user?.id)) return; if (m.other_user) setPreviewProfile(m.other_user); }} aria-label={storyState(m.other_user?.id) ? `Watch ${m.other_user?.name}'s story` : `View ${m.other_user?.name}'s profile`} role="button" style={{ cursor: "pointer", margin: 4 }}>
+                          <Avatar src={photo} size={56} sig={sigOf(m.other_user?.id)} ring="pair" ringRGB={ringRGB} glow={glow} pulse={online} story={storyState(m.other_user?.id)} />
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
