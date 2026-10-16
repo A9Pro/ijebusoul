@@ -16,6 +16,8 @@ const SIZE = 42;
 
 // Remembered between visits, so the header never flashes empty when you come back to a page.
 let remembered: StoryFeed | null = null;
+let rememberedAt = 0;
+const FRESH_MS = 60_000; // moving between pages inside this window reuses the row instead of asking again
 
 type IdleWindow = Window & {
   requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
@@ -40,6 +42,7 @@ export default function StoriesTray() {
     try {
       const f = await loadStoryFeed(uid);
       remembered = f;
+      rememberedAt = Date.now();
       setFeed(f);
     } catch { /* the row simply stays as it was */ }
     setLoaded(true);
@@ -48,6 +51,7 @@ export default function StoriesTray() {
   // First load: wait for an idle moment so the feed underneath gets the network first.
   useEffect(() => {
     if (!uid) return;
+    if (remembered && Date.now() - rememberedAt < FRESH_MS) return;
     const w = window as IdleWindow;
     let idleId = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -91,7 +95,7 @@ export default function StoriesTray() {
   return (
     <>
       <style>{`
-        .st-row{display:flex;align-items:center;gap:10px;overflow-x:auto;scrollbar-width:none;padding:2px 14px 2px 2px;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 22px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 22px),transparent)}
+        .st-row{display:flex;align-items:center;gap:10px;overflow-x:auto;scrollbar-width:none;padding:1px 14px 1px 2px;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 22px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 22px),transparent)}
         .st-row::-webkit-scrollbar{display:none}
         .st-item{position:relative;display:block;background:none;border:0;padding:0;cursor:pointer;flex-shrink:0;transition:transform .15s;-webkit-tap-highlight-color:transparent}
         .st-item:active{transform:scale(.92)}
@@ -106,7 +110,7 @@ export default function StoriesTray() {
           <button className="st-item" onClick={() => (mineGroup ? openGroup(uid) : setComposing(true))} aria-label={mineGroup ? "View your story" : "Add to your story"} title="Your story">
             {circle(!!mineGroup && mineGroup.hasUnseen, myPhoto ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={myPhoto} alt="" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null)}
           </button>
-          <button onClick={() => setComposing(true)} aria-label="Add a story" style={{ position: "absolute", right: -3, bottom: -2, width: 20, height: 20, borderRadius: "50%", border: "2px solid #0a0a10", background: "linear-gradient(180deg,#f6e08a,#D4AF37)", color: "#1a1204", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}>
+          <button onClick={() => setComposing(true)} aria-label="Add a story" style={{ position: "absolute", right: -2, bottom: 0, width: 20, height: 20, borderRadius: "50%", border: "2px solid #0a0a10", background: "linear-gradient(180deg,#f6e08a,#D4AF37)", color: "#1a1204", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}>
             <Plus size={12} strokeWidth={3.4} />
           </button>
         </div>

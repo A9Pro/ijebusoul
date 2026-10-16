@@ -55,7 +55,8 @@ const timeAgo = (iso: string) => {
 // Woven aso-oke, the same cloth every time, used as the header's background.
 const CLOTH_STRIPS = buildStrips("ijebusoul", 9);
 
-export default function Header({ stories = false }: { stories?: boolean } = {}) {
+// Stories show on every page by default. Pass stories={false} on a page that should not have them.
+export default function Header({ stories = true }: { stories?: boolean } = {}) {
   const router = useRouter();
   const { user } = useAuth();
   const { colors } = useTheme();
@@ -151,7 +152,7 @@ export default function Header({ stories = false }: { stories?: boolean } = {}) 
 
       {previewProfile && <ProfilePreviewModal profile={previewProfile} onClose={() => setPreviewProfile(null)} />}
 
-      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, minHeight: 68, padding: stories ? "11px 14px 11px 16px" : "16px 20px" }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, minHeight: 54, padding: stories ? "5px 14px 5px 16px" : "8px 16px" }}>
 
         <div onClick={() => router.push("/home")} role="link" aria-label="ìjèbú soul home" style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", flexShrink: 0 }}>
           <IjebuSoulLogo accent="#D4AF37" stroke="#fff" />
