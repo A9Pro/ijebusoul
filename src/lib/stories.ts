@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import type { Post } from "@/lib/types";
 
 export const STORY_BUCKET = "stories";
 export const STORY_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -18,6 +19,8 @@ export type Story = {
   expires_at: string;
   reshared_from: string | null;
   origin_user: string | null;
+  /** Set when the story was made from a feed post. */
+  source_post?: string | null;
   // derived for the signed-in viewer
   likes: number;
   liked: boolean;
@@ -205,8 +208,84 @@ export async function reshareStory(story: Story, myId: string): Promise<boolean>
     bg_color: story.bg_color,
     reshared_from: story.id,
     origin_user: story.origin_user ?? story.user_id,
+    ...(story.source_post ? { source_post: story.source_post } : {}),
   });
   if (error) return false;
   await supabase.from("story_reshares").insert({ story_id: story.id, user_id: myId });
+  announce("stories:changed");
   return true;
+}
+
+// ── Sharing between the feed and stories ─────────────────────────────────────
+
+export const POST_BUCKET = "posts";
+export type ShareResult = { ok: boolean; reason?: "sql" | "failed" };
+
+/** Lets other parts of the app (the tray, the feed) refresh without being wired together. */
+function announce(name: "stories:changed" | "feed:refresh") {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(name));
+}
+
+const needsSql = (message?: string) => /source_post|origin_user/i.test(message ?? "");
+const extOf = (path: string, fallback: string) => (path.includes(".") ? path.split(".").pop() || fallback : fallback);
+
+/** Copies a file between buckets. Tries the server-side copy first, then download and upload. */
+async function copyAcross(fromBucket: string, fromPath: string, toBucket: string, toPath: string): Promise<boolean> {
+  const direct = await supabase.storage.from(fromBucket).copy(fromPath, toPath, { destinationBucket: toBucket });
+  if (!direct.error) return true;
+  const dl = await supabase.storage.from(fromBucket).download(fromPath);
+  if (dl.error || !dl.data) return false;
+  const up = await supabase.storage.from(toBucket).upload(toPath, dl.data, { contentType: dl.data.type || undefined });
+  return !up.error;
+}
+
+/** Feed post to your story. The file is copied, so deleting the post later never breaks the story. */
+export async function postToStory(post: Post, myId: string): Promise<ShareResult> {
+  let path: string | null = null;
+  if (post.type !== "text") {
+    if (!post.media_url) return { ok: false, reason: "failed" };
+    path = `${myId}/${Date.now()}-post.${extOf(post.media_url, post.type === "video" ? "mp4" : "jpg")}`;
+    if (!(await copyAcross(POST_BUCKET, post.media_url, STORY_BUCKET, path))) return { ok: false, reason: "failed" };
+  }
+  const { error } = await supabase.from("stories").insert({
+    user_id: myId,
+    type: post.type,
+    media_url: path,
+    caption: post.caption?.trim() || null,
+    bg_color: post.type === "text" ? post.bg_color ?? null : null,
+    source_post: post.id,
+    origin_user: post.user_id !== myId ? post.user_id : null,
+  });
+  if (error) {
+    if (path) void supabase.storage.from(STORY_BUCKET).remove([path]);
+    return { ok: false, reason: needsSql(error.message) ? "sql" : "failed" };
+  }
+  announce("stories:changed");
+  return { ok: true };
+}
+
+/** Story to your feed. Credits whoever made the original. */
+export async function repostStoryToFeed(story: Story, myId: string): Promise<ShareResult> {
+  let path: string | null = null;
+  if (story.type !== "text") {
+    if (!story.media_url) return { ok: false, reason: "failed" };
+    path = `${myId}/${Date.now()}-story.${extOf(story.media_url, story.type === "video" ? "mp4" : "jpg")}`;
+    if (!(await copyAcross(STORY_BUCKET, story.media_url, POST_BUCKET, path))) return { ok: false, reason: "failed" };
+  }
+  const { error } = await supabase.from("posts").insert({
+    user_id: myId,
+    type: story.type,
+    caption: story.caption ?? "",
+    media_url: path,
+    bg_color: story.bg_color ?? "#1a1a2e",
+    likes_count: 0,
+    comments_count: 0,
+    origin_user: story.origin_user ?? (story.user_id !== myId ? story.user_id : null),
+  });
+  if (error) {
+    if (path) void supabase.storage.from(POST_BUCKET).remove([path]);
+    return { ok: false, reason: needsSql(error.message) ? "sql" : "failed" };
+  }
+  announce("feed:refresh");
+  return { ok: true };
 }

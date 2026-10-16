@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef, useMemo, memo } from "react";
+import { memo, useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, avatarUrl, postMediaUrl } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
@@ -7,11 +7,14 @@ import { useTheme } from "@/context/ThemeContext";
 import BottomNav, { BOTTOM_NAV_HEIGHT } from "@/components/BottomNav";
 import Header from "@/components/Header";
 import StoriesTray from "@/components/StoriesTray";
+import ReelViewer, { type ReelActions } from "@/components/ReelViewer";
+import ShareSheet from "@/components/ShareSheet";
+import { postToStory } from "@/lib/stories";
 import type { Post } from "@/lib/types";
 import {
   Sparkles, MessageCircle, Share2, Bookmark, MoreHorizontal, X,
   Image as ImageIcon, Type as TypeIcon, Pencil, Trash2,
-  Volume2, VolumeX, Inbox, Plus, ArrowUp, Zap, MapPin, Landmark, Flame, User, UserPlus, UserCheck, LayoutGrid, Users,
+  Volume2, VolumeX, Maximize2, Inbox, Plus, ArrowUp, Zap, MapPin, Landmark, Flame, User, UserPlus, UserCheck, LayoutGrid, Users,
 } from "lucide-react";
 
 type Colors = ReturnType<typeof useTheme>["colors"];
@@ -32,11 +35,16 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HEAT = "255,122,40";
-// The feed only ever shows a name, a place and a photo, so that is all it asks for.
-// (Selecting "*" used to drag every member's full profile, birth date included, into the browser.)
-const PROFILE_COLS = "id,name,avatar_url,photos,location";
-const NONE: never[] = []; // one shared empty list, so "no likers / no comments" never looks like a change
 const profileHref = (id: string) => `/profile/${id}`; // change if your profile route is different
+
+// Only the columns the feed actually shows. Smaller responses, faster first paint,
+// and private fields (birthday, preferences) never reach the stream.
+const POST_SELECT = "*, profile:profiles!posts_user_id_fkey(id,name,location,avatar_url,photos)";
+const COMMENT_SELECT = "*, profile:profiles!comments_user_id_fkey(id,name,avatar_url,photos)";
+const PAGE_SIZE = 12; // posts fetched at a time; more load as you near the end
+const EMPTY_LIKERS: { id: string; photo: string | null }[] = [];
+const EMPTY_ORBIT: CommentItem[] = [];
+const EMPTY_COMMENTS: CommentItem[] = [];
 
 // Culture, stories and events work through hashtags in the caption, so no database change is needed.
 const CULTURE_TAGS: [string, string][] = [
@@ -98,6 +106,20 @@ function useDoubleTap(onSingle: (() => void) | null, onDouble: () => void, delay
 }
 
 // ── One post = one full-screen scene ──────────────────────────────────────────
+interface PostActions {
+  open(post: Post): void;
+  node(post: Post): void;
+  toggleMenu(id: string): void;
+  feel(post: Post): void;
+  follow(post: Post): void;
+  save(post: Post): void;
+  talk(id: string): void;
+  share(post: Post): void;
+  edit(post: Post): void;
+  del(post: Post): void;
+  toggleSound(): void;
+}
+
 interface SoulPostProps {
   post: Post;
   isOwner: boolean;
@@ -108,29 +130,29 @@ interface SoulPostProps {
   arriving: boolean;
   orbit: CommentItem[];
   soundOn: boolean;
-  active: boolean;
-  onToggleSound: () => void;
-  onNode: () => void;
   incoming: number;
-  onToggleMenu: () => void;
-  onFeel: () => void;
-  onFollow: () => void;
-  onSave: () => void;
-  onTalk: () => void;
-  onShare: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
+  originName?: string;
+  /** A reel is open on top, so this post stays quiet underneath. */
+  frozen: boolean;
+  /** The first posts load their media straight away. */
+  priority: boolean;
+  scrollerRef: React.RefObject<HTMLDivElement | null>;
+  /** One stable object, so a post only re-renders when its own data changes. */
+  actions: PostActions;
 }
 
-// A post only redraws when something it actually shows has changed. The handler props are rebuilt on
-// every render of the page, so they are deliberately left out of this check.
-const SOUL_POST_DATA = ["post", "isOwner", "menuOpen", "likers", "hot", "arriving", "orbit", "soundOn", "incoming", "active"] as const;
-function sameSoulPost(a: SoulPostProps, b: SoulPostProps) {
-  return SOUL_POST_DATA.every(k => a[k] === b[k]);
-}
-
-const SoulPost = memo(function SoulPost(p: SoulPostProps) {
+function SoulPostBase(p: SoulPostProps) {
   const { post } = p;
+  const a = p.actions;
+  const onNode = () => a.node(post);
+  const onToggleMenu = () => a.toggleMenu(post.id);
+  const onFeel = () => a.feel(post);
+  const onFollow = () => a.follow(post);
+  const onSave = () => a.save(post);
+  const onTalk = () => a.talk(post.id);
+  const onShare = () => a.share(post);
+  const onEdit = () => a.edit(post);
+  const onDelete = () => a.del(post);
   // caption can be undefined/null in the Post type, so default it once here
   const caption = post.caption ?? "";
   const photo = avatarUrl(post.profile?.photos?.[0] ?? post.profile?.avatar_url);
@@ -143,8 +165,44 @@ const SoulPost = memo(function SoulPost(p: SoulPostProps) {
   const heat = Math.min(1, Math.max(energy / 40, p.hot ? 0.6 : 0));
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const secRef = useRef<HTMLElement>(null);
+  const visibleRef = useRef(false);
+  const frozenRef = useRef(p.frozen);
+  frozenRef.current = p.frozen;
   const muted = !p.soundOn;
   const [bursts, setBursts] = useState<{ id: number; origin: "dock" | "center" }[]>([]);
+
+  // Media and decorative animation only exist while this post is within about a screen and a half
+  // of the viewport. Far-away posts hold nothing heavy, so scrolling stays smooth however long the stream gets.
+  const [near, setNear] = useState(p.priority);
+  const [mediaReady, setMediaReady] = useState(false);
+  useEffect(() => {
+    const el = secRef.current;
+    const root = p.scrollerRef.current;
+    if (!el || !root || typeof IntersectionObserver === "undefined") { setNear(true); return; }
+    const enter = new IntersectionObserver(([e]) => { if (e.isIntersecting) setNear(true); }, { root, rootMargin: "150% 0px 150% 0px" });
+    const leave = new IntersectionObserver(([e]) => { if (!e.isIntersecting) setNear(false); }, { root, rootMargin: "400% 0px 400% 0px" });
+    enter.observe(el);
+    leave.observe(el);
+    return () => { enter.disconnect(); leave.disconnect(); };
+  }, [p.scrollerRef]);
+
+  useEffect(() => { if (!near) setMediaReady(false); }, [near]);
+
+  // Videos far from the screen release their decoder completely (phones only allow a few at once).
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (!near) { v.pause(); v.removeAttribute("src"); v.load(); }
+    else if (visibleRef.current && !frozenRef.current) v.play().catch(() => {});
+  }, [near]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (p.frozen) v.pause();
+    else if (visibleRef.current) v.play().catch(() => {});
+  }, [p.frozen]);
 
   useEffect(() => {
     if (!isVideo || !videoRef.current) return;
@@ -152,12 +210,13 @@ const SoulPost = memo(function SoulPost(p: SoulPostProps) {
     const io = new IntersectionObserver(
       ([entry]) => {
         const r = entry.intersectionRatio;
-        if (entry.isIntersecting && r > 0.6) el.play().catch(() => {});
+        visibleRef.current = entry.isIntersecting && r > 0.6;
+        if (visibleRef.current && !frozenRef.current) el.play().catch(() => {});
         else el.pause();
         // spatial audio: sound swells as the post nears the middle of the screen
         el.volume = Math.max(0, Math.min(1, (r - 0.4) / 0.6));
       },
-      { threshold: Array.from({ length: 11 }, (_, i) => i / 10) }
+      { threshold: [0, 0.2, 0.4, 0.6, 0.8, 1] }
     );
     io.observe(el);
     return () => io.disconnect();
@@ -174,25 +233,20 @@ const SoulPost = memo(function SoulPost(p: SoulPostProps) {
 
   const feel = () => {
     if (!post.user_liked) addBurst("dock");
-    p.onFeel();
+    onFeel();
   };
 
-  const togglePlay = () => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) v.play().catch(() => {}); else v.pause();
-  };
-
-  const handleTap = useDoubleTap(isVideo ? togglePlay : null, () => {
+  // single tap opens the reel on this post, double tap feels it
+  const handleTap = useDoubleTap(() => a.open(post), () => {
     addBurst("center");
-    if (!post.user_liked) p.onFeel();
+    if (!post.user_liked) onFeel();
   });
 
   // Generative text-post world: base colour is the author's choice, light is theirs.
   const world = useMemo(() => {
     const r = rng(hash(post.id));
     const x1 = 15 + r() * 70, y1 = 10 + r() * 35, x2 = 15 + r() * 70, y2 = 55 + r() * 35;
-    const dots = Array.from({ length: 9 }, () => ({
+    const dots = Array.from({ length: 14 }, () => ({
       left: r() * 100, top: r() * 100, size: 2 + r() * 3,
       dur: 7 + r() * 9, delay: -r() * 12, drift: 20 + r() * 40,
     }));
@@ -204,13 +258,14 @@ const SoulPost = memo(function SoulPost(p: SoulPostProps) {
 
   return (
     <section
+      ref={secRef}
       id={`soul-${post.id}`}
       data-soul="1"
       className="soul-anim"
       style={{
         height: `calc(100% - ${BOTTOM_NAV_HEIGHT + 48}px)`, boxSizing: "border-box",
         // busy posts physically take more room in the stream
-        padding: `${6 - heat * 4}px ${12 - heat * 8}px`,
+        padding: `${6 - heat * 4}px ${12 - heat * 8}px`, transition: "padding 0.6s",
         scrollSnapAlign: "start", scrollSnapStop: "always",
         animation: p.arriving ? "riverArrive 0.9s cubic-bezier(.2,.8,.2,1)" : undefined,
       }}
@@ -219,6 +274,8 @@ const SoulPost = memo(function SoulPost(p: SoulPostProps) {
         position: "relative", height: "100%", borderRadius: 26, overflow: "hidden", background: "#0b0b12",
         border: `1px solid rgba(${glow},${0.28 + heat * 0.4})`,
         boxShadow: `0 0 ${14 + heat * 30}px rgba(${glow},${0.2 + heat * 0.3}), inset 0 0 ${30 + heat * 50}px rgba(${glow},${0.05 + heat * 0.2})`,
+        transition: "box-shadow 0.6s, border-color 0.6s",
+        animation: p.hot && near ? "heatField 2.8s ease-in-out infinite" : undefined,
       }}>
         {/* surface */}
         {isText ? (
@@ -226,21 +283,42 @@ const SoulPost = memo(function SoulPost(p: SoulPostProps) {
             position: "absolute", inset: 0,
             background: `radial-gradient(60% 45% at ${world.x1}% ${world.y1}%, rgba(${sig},0.34), transparent 70%), radial-gradient(55% 45% at ${world.x2}% ${world.y2}%, rgba(${sig},0.18), transparent 70%), ${post.bg_color || "#1a1a2e"}`,
           }}>
-            {world.dots.map((d, i) => (
+            {near && world.dots.slice(0, 10).map((d, i) => (
               <span key={i} className="soul-anim" style={{
                 position: "absolute", left: `${d.left}%`, top: `${d.top}%`, width: d.size, height: d.size,
                 borderRadius: "50%", background: `rgba(${sig},0.8)`, boxShadow: `0 0 8px rgba(${sig},0.7)`,
-                animation: `soulDrift ${d.dur}s ease-in-out ${d.delay}s infinite`, animationPlayState: p.active ? "running" : "paused",
+                animation: `soulDrift ${d.dur}s ease-in-out ${d.delay}s infinite`,
                 ["--drift" as string]: `${d.drift}px`,
               }} />
             ))}
           </div>
         ) : media ? (
-          isVideo ? (
-            <video ref={videoRef} src={media} muted={muted} loop playsInline preload={p.active ? "auto" : "metadata"} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
-          ) : (
-            <img src={media} alt="" decoding="async" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
-          )
+          <>
+            {/* a soft glow in the author's colour holds the place until the real picture is ready */}
+            <div style={{ position: "absolute", inset: 0, background: `radial-gradient(70% 50% at 50% 38%, rgba(${sig},0.22), transparent 75%), #0b0b12` }} />
+            {isVideo ? (
+              <video
+                ref={videoRef}
+                src={near ? `${media}#t=0.001` : undefined}
+                muted={muted}
+                loop
+                playsInline
+                preload={p.priority ? "auto" : "metadata"}
+                onLoadedData={() => setMediaReady(true)}
+                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: mediaReady ? 1 : 0, transition: "opacity .35s ease" }}
+              />
+            ) : near ? (
+              <img
+                ref={el => { if (el && el.complete && el.naturalWidth > 0) setMediaReady(true); }}
+                src={media}
+                alt=""
+                decoding="async"
+                fetchPriority={p.priority ? "high" : "auto"}
+                onLoad={() => setMediaReady(true)}
+                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: mediaReady ? 1 : 0, transition: "opacity .35s ease" }}
+              />
+            ) : null}
+          </>
         ) : (
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <ImageIcon size={40} color="rgba(255,255,255,0.3)" />
@@ -249,7 +327,7 @@ const SoulPost = memo(function SoulPost(p: SoulPostProps) {
 
         <div style={{ position: "absolute", inset: 0, background: isText ? "linear-gradient(to bottom, rgba(0,0,0,0.45) 0%, transparent 25%, transparent 55%, rgba(0,0,0,0.7) 100%)" : "linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, transparent 24%, transparent 48%, rgba(0,0,0,0.88) 100%)", pointerEvents: "none" }} />
 
-        {/* tap surface: single = play/pause (video), double = feel */}
+        {/* tap surface: single = open the reel, double = feel */}
         <div onClick={handleTap} style={{ position: "absolute", inset: 0, zIndex: 1, cursor: "pointer" }} />
 
         {isText && (
@@ -284,10 +362,10 @@ const SoulPost = memo(function SoulPost(p: SoulPostProps) {
 
         {/* identity */}
         <div style={{ position: "absolute", top: 14, left: 14, right: 14, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", pointerEvents: "none" }}>
-          <div onClick={p.onNode} role="button" aria-label="Open profile preview" style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, pointerEvents: "auto", cursor: "pointer" }}>
+          <div onClick={onNode} role="button" aria-label="Open profile preview" style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, pointerEvents: "auto", cursor: "pointer" }}>
             <div style={{ width: 46, height: 46, borderRadius: "50%", padding: 2.5, background: `conic-gradient(rgb(${sig}), rgba(${sig},0.25), rgb(${sig}))`, boxShadow: `0 0 ${8 + heat * 16}px rgba(${sig},${0.35 + heat * 0.4})`, flexShrink: 0 }}>
               <div style={{ width: "100%", height: "100%", borderRadius: "50%", background: "#111", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {photo ? <img src={photo} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 20 }}>🙂</span>}
+                {photo ? <img loading="lazy" decoding="async" src={photo} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 20 }}>🙂</span>}
               </div>
             </div>
             <div style={{ minWidth: 0 }}>
@@ -295,24 +373,25 @@ const SoulPost = memo(function SoulPost(p: SoulPostProps) {
               <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "rgba(255,255,255,0.78)", textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>
                 {post.profile?.location && <MapPin size={11} />}
                 {[post.profile?.location, timeAgo(post.created_at)].filter(Boolean).join(" · ")}
+                {p.originName && <span style={{ color: `rgb(${sig})`, fontWeight: 700 }}> · ↻ from {p.originName}</span>}
               </div>
             </div>
           </div>
 
           <div style={{ pointerEvents: "auto", flexShrink: 0 }}>
             {!p.isOwner ? (
-              <button onClick={p.onFollow} style={{ background: post.user_following ? "rgba(40,40,48,0.85)" : GOLD, border: post.user_following ? "1px solid rgba(255,255,255,0.25)" : "none", borderRadius: 50, padding: "7px 16px", fontSize: 12, fontWeight: 700, color: post.user_following ? "#fff" : "#000", cursor: "pointer" }}>
+              <button onClick={onFollow} style={{ background: post.user_following ? "rgba(255,255,255,0.12)" : GOLD, backdropFilter: "blur(8px)", border: post.user_following ? "1px solid rgba(255,255,255,0.25)" : "none", borderRadius: 50, padding: "7px 16px", fontSize: 12, fontWeight: 700, color: post.user_following ? "#fff" : "#000", cursor: "pointer" }}>
                 {post.user_following ? "Following" : "Follow"}
               </button>
             ) : (
               <div style={{ position: "relative" }} ref={p.menuOpen ? p.menuRef : undefined}>
-                <button onClick={p.onToggleMenu} aria-label="Post options" style={{ width: 38, height: 38, borderRadius: "50%", background: "rgba(0,0,0,0.6)", border: "1px solid rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                <button onClick={onToggleMenu} aria-label="Post options" style={{ width: 38, height: 38, borderRadius: "50%", background: "rgba(0,0,0,0.4)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
                   <MoreHorizontal size={18} color="#fff" />
                 </button>
                 {p.menuOpen && (
                   <div style={{ position: "absolute", top: 44, right: 0, background: "rgba(18,18,24,0.96)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, overflow: "hidden", minWidth: 140, zIndex: 20 }}>
-                    <button onClick={p.onEdit} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", padding: "11px 14px", fontSize: 13, color: "#fff", cursor: "pointer" }}><Pencil size={14} /> Edit</button>
-                    <button onClick={p.onDelete} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", padding: "11px 14px", fontSize: 13, color: "#FF3366", cursor: "pointer" }}><Trash2 size={14} /> Delete</button>
+                    <button onClick={onEdit} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", padding: "11px 14px", fontSize: 13, color: "#fff", cursor: "pointer" }}><Pencil size={14} /> Edit</button>
+                    <button onClick={onDelete} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", padding: "11px 14px", fontSize: 13, color: "#FF3366", cursor: "pointer" }}><Trash2 size={14} /> Delete</button>
                   </div>
                 )}
               </div>
@@ -320,20 +399,25 @@ const SoulPost = memo(function SoulPost(p: SoulPostProps) {
           </div>
         </div>
 
+        <button onClick={() => a.open(post)} aria-label="Open in full screen"
+          style={{ position: "absolute", top: 72, right: 14, zIndex: 4, width: 36, height: 36, borderRadius: "50%", background: "rgba(0,0,0,0.45)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+          <Maximize2 size={15} color="#fff" />
+        </button>
+
         {isVideo && (
-          <button onClick={p.onToggleSound} aria-label={muted ? "Unmute" : "Mute"}
-            style={{ position: "absolute", top: 72, right: 14, zIndex: 4, width: 36, height: 36, borderRadius: "50%", background: "rgba(0,0,0,0.65)", border: "1px solid rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+          <button onClick={a.toggleSound} aria-label={muted ? "Unmute" : "Mute"}
+            style={{ position: "absolute", top: 116, right: 14, zIndex: 4, width: 36, height: 36, borderRadius: "50%", background: "rgba(0,0,0,0.45)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
             {muted ? <VolumeX size={16} color="#fff" /> : <Volume2 size={16} color="#fff" />}
           </button>
         )}
 
         {p.hot && (
           <>
-            <div style={{ position: "absolute", top: 68, left: 14, zIndex: 2, display: "flex", alignItems: "center", gap: 5, background: `rgba(${HEAT},0.18)`, border: `1px solid rgba(${HEAT},0.55)`, borderRadius: 50, padding: "4px 10px", fontSize: 12, fontWeight: 800, color: "#ffb27a", pointerEvents: "none", }}>
+            <div style={{ position: "absolute", top: 68, left: 14, zIndex: 2, display: "flex", alignItems: "center", gap: 5, background: `rgba(${HEAT},0.18)`, border: `1px solid rgba(${HEAT},0.55)`, borderRadius: 50, padding: "4px 10px", fontSize: 12, fontWeight: 800, color: "#ffb27a", pointerEvents: "none", backdropFilter: "blur(6px)" }}>
               <Flame size={13} /> Trending
             </div>
-            {Array.from({ length: 5 }, (_, i) => (
-              <span key={i} className="soul-anim" style={{ position: "absolute", bottom: -6, left: `${10 + i * 20}%`, width: 4, height: 4, borderRadius: "50%", background: `rgb(${HEAT})`, boxShadow: `0 0 10px rgb(${HEAT})`, animation: `emberRise ${3.2 + (i % 4) * 0.9}s ease-in ${-(i * 0.7)}s infinite`, animationPlayState: p.active ? "running" : "paused", pointerEvents: "none", zIndex: 1 }} />
+            {near && Array.from({ length: 9 }, (_, i) => (
+              <span key={i} className="soul-anim" style={{ position: "absolute", bottom: -6, left: `${8 + i * 10.5}%`, width: 4, height: 4, borderRadius: "50%", background: `rgb(${HEAT})`, boxShadow: `0 0 10px rgb(${HEAT})`, animation: `emberRise ${3.2 + (i % 4) * 0.9}s ease-in ${-(i * 0.7)}s infinite`, pointerEvents: "none", zIndex: 1 }} />
             ))}
           </>
         )}
@@ -343,9 +427,9 @@ const SoulPost = memo(function SoulPost(p: SoulPostProps) {
           const cp = avatarUrl(c.profile?.photos?.[0] ?? c.profile?.avatar_url);
           const tops = isText ? ["18%", "68%"] : ["34%", "47%"];
           return (
-            <button key={c.id} onClick={p.onTalk} className="soul-anim" style={{ position: "absolute", zIndex: 2, top: tops[i] ?? tops[1], ...(i === 0 ? { right: 12 } : { left: 12 }), maxWidth: "62%", display: "flex", alignItems: "center", gap: 7, background: "rgba(14,14,20,0.82)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 18, padding: "5px 11px 5px 5px", cursor: "pointer", textAlign: "left", animation: `orbitFloat ${6 + i * 2}s ease-in-out infinite` }}>
+            <button key={c.id} onClick={onTalk} className="soul-anim" style={{ position: "absolute", zIndex: 2, top: tops[i] ?? tops[1], ...(i === 0 ? { right: 12 } : { left: 12 }), maxWidth: "62%", display: "flex", alignItems: "center", gap: 7, background: "rgba(14,14,20,0.55)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 18, padding: "5px 11px 5px 5px", cursor: "pointer", textAlign: "left", animation: near ? `orbitFloat ${6 + i * 2}s ease-in-out infinite` : undefined }}>
               <span style={{ width: 22, height: 22, borderRadius: "50%", background: "#1c1c26", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>
-                {cp ? <img src={cp} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "🙂"}
+                {cp ? <img loading="lazy" decoding="async" src={cp} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "🙂"}
               </span>
               <span style={{ fontSize: 12, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 <b style={{ color: GOLD }}>{c.profile?.name ?? "Someone"}</b> {c.content}
@@ -367,7 +451,7 @@ const SoulPost = memo(function SoulPost(p: SoulPostProps) {
               <div style={{ display: "flex" }}>
                 {p.likers.map((l, i) => (
                   <div key={l.id} style={{ width: 24, height: 24, borderRadius: "50%", border: "2px solid #0b0b12", marginLeft: i === 0 ? 0 : -8, background: "#1c1c26", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>
-                    {l.photo ? <img src={l.photo} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "🙂"}
+                    {l.photo ? <img loading="lazy" decoding="async" src={l.photo} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "🙂"}
                   </div>
                 ))}
               </div>
@@ -378,17 +462,17 @@ const SoulPost = memo(function SoulPost(p: SoulPostProps) {
             </div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(14,14,20,0.82)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 50, padding: 6, pointerEvents: "auto" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(14,14,20,0.55)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 50, padding: 6, pointerEvents: "auto" }}>
             <button onClick={feel} style={{ flex: 1.3, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: post.user_liked ? `rgba(${sig},0.95)` : "rgba(255,255,255,0.08)", border: "none", borderRadius: 50, padding: "12px 0", fontSize: 14, fontWeight: 800, color: post.user_liked ? "#000" : "#fff", cursor: "pointer", transition: "background 0.2s", boxShadow: post.user_liked ? `0 0 18px rgba(${sig},0.6)` : "none" }}>
               <Sparkles size={17} fill={post.user_liked ? "#000" : "none"} /> {post.user_liked ? "Felt" : "Feel"}
             </button>
-            <button onClick={p.onTalk} aria-label="Open conversation" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "none", border: "none", padding: "12px 0", fontSize: 13, fontWeight: 700, color: "#fff", cursor: "pointer" }}>
+            <button onClick={onTalk} aria-label="Open conversation" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "none", border: "none", padding: "12px 0", fontSize: 13, fontWeight: 700, color: "#fff", cursor: "pointer" }}>
               <MessageCircle size={19} /> {post.comments_count.toLocaleString()}
             </button>
-            <button onClick={p.onShare} aria-label="Share" style={{ width: 46, display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", padding: "12px 0", cursor: "pointer" }}>
+            <button onClick={onShare} aria-label="Share" style={{ width: 46, display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", padding: "12px 0", cursor: "pointer" }}>
               <Share2 size={19} color="#fff" />
             </button>
-            <button onClick={p.onSave} aria-label={post.user_saved ? "Remove from saved" : "Save"} style={{ width: 46, display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", padding: "12px 0", cursor: "pointer" }}>
+            <button onClick={onSave} aria-label={post.user_saved ? "Remove from saved" : "Save"} style={{ width: 46, display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", padding: "12px 0", cursor: "pointer" }}>
               <Bookmark size={19} color={post.user_saved ? GOLD : "#fff"} fill={post.user_saved ? GOLD : "none"} />
             </button>
           </div>
@@ -396,15 +480,32 @@ const SoulPost = memo(function SoulPost(p: SoulPostProps) {
       </div>
     </section>
   );
-}, sameSoulPost);
+}
+
+const SoulPost = memo(SoulPostBase);
+
+function SkeletonCard() {
+  return (
+    <section aria-hidden="true" style={{ height: `calc(100% - ${BOTTOM_NAV_HEIGHT + 48}px)`, boxSizing: "border-box", padding: "6px 12px", scrollSnapAlign: "start" }}>
+      <div className="soul-anim" style={{ height: "100%", borderRadius: 26, border: "1px solid rgba(255,255,255,0.07)", background: "linear-gradient(110deg, #0d0d16 30%, #171722 50%, #0d0d16 70%)", backgroundSize: "200% 100%", animation: "shimmer 1.4s linear infinite" }} />
+    </section>
+  );
+}
 
 // ── Conversation layer ────────────────────────────────────────────────────────
 function ConversationLayer({
-  post, comments, loading, draft, setDraft, submitting, myId, onSubmit, onClose,
+  comments, loading, submitting, myId, onSubmit, onClose,
 }: {
-  post: Post; comments: CommentItem[]; loading: boolean; draft: string; setDraft: (v: string) => void;
-  submitting: boolean; myId: string; onSubmit: () => void; onClose: () => void;
+  comments: CommentItem[]; loading: boolean;
+  submitting: boolean; myId: string; onSubmit: (text: string) => Promise<boolean>; onClose: () => void;
 }) {
+  // The draft lives here, so typing never re-renders the whole stream behind it.
+  const [draft, setDraft] = useState("");
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || submitting) return;
+    if (await onSubmit(text)) setDraft("");
+  };
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [comments.length]);
   const speakers = new Set(comments.map(c => c.user_id)).size;
@@ -440,7 +541,7 @@ function ConversationLayer({
             return (
               <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexDirection: mine ? "row-reverse" : "row", alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "86%" }}>
                 <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#1c1c26", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {cPhoto ? <img src={cPhoto} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 13 }}>🙂</span>}
+                  {cPhoto ? <img loading="lazy" decoding="async" src={cPhoto} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 13 }}>🙂</span>}
                 </div>
                 <div style={{ background: mine ? "rgba(212,175,55,0.2)" : "rgba(255,255,255,0.09)", border: mine ? "1px solid rgba(212,175,55,0.35)" : "1px solid rgba(255,255,255,0.08)", borderRadius: mine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", padding: "9px 13px" }}>
                   {!mine && <div style={{ fontSize: 11, fontWeight: 700, color: GOLD, marginBottom: 2 }}>{c.profile?.name ?? "Someone"}</div>}
@@ -456,12 +557,12 @@ function ConversationLayer({
           <input
             value={draft}
             onChange={e => setDraft(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") onSubmit(); }}
+            onKeyDown={e => { if (e.key === "Enter") void send(); }}
             placeholder="Say something…"
             style={{ flex: 1, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 50, padding: "12px 18px", fontSize: 14, color: "#fff", outline: "none", fontFamily: "system-ui" }}
           />
           <button
-            onClick={onSubmit}
+            onClick={() => void send()}
             disabled={!draft.trim() || submitting}
             aria-label="Send"
             style={{ width: 42, height: 42, borderRadius: "50%", background: GOLD, border: "none", cursor: draft.trim() ? "pointer" : "not-allowed", opacity: draft.trim() ? 1 : 0.45, display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -495,7 +596,7 @@ function SoulNode({ post, isMe, energy, count, onClose, onFollow, onFilter, onPr
         <div style={{ position: "absolute", left: 150 - R, top: 150 - R, width: R * 2, height: R * 2, borderRadius: "50%", border: `1px dashed rgba(${sig},0.35)` }} />
         <div style={{ position: "absolute", left: 90, top: 90, width: 120, height: 120, borderRadius: "50%", padding: 3, background: `conic-gradient(rgb(${sig}), rgba(${sig},0.2), rgb(${sig}))`, boxShadow: `0 0 40px rgba(${sig},0.5)` }}>
           <div style={{ width: "100%", height: "100%", borderRadius: "50%", background: "#111", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {photo ? <img src={photo} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 44 }}>🙂</span>}
+            {photo ? <img loading="lazy" decoding="async" src={photo} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 44 }}>🙂</span>}
           </div>
         </div>
 
@@ -609,7 +710,7 @@ const SoulComposer = ({ userId, editingPost, onClose, onCreated, onUpdated, colo
           .from("posts")
           .update({ type: finalType, caption: caption.trim(), media_url: finalType === "text" ? null : mediaPath, bg_color: bgColor })
           .eq("id", editingPost.id)
-          .select(`*, profile:profiles!posts_user_id_fkey(${PROFILE_COLS})`)
+          .select(POST_SELECT)
           .single();
         if (updateErr) throw updateErr;
 
@@ -633,7 +734,7 @@ const SoulComposer = ({ userId, editingPost, onClose, onCreated, onUpdated, colo
           likes_count: 0,
           comments_count: 0,
         })
-        .select(`*, profile:profiles!posts_user_id_fkey(${PROFILE_COLS})`)
+        .select(POST_SELECT)
         .single();
       if (insertErr) throw insertErr;
 
@@ -770,9 +871,18 @@ export default function FeedPage() {
   const [arrivedIds, setArrivedIds] = useState<Set<string>>(new Set());
   const [incoming, setIncoming] = useState<{ postId: string; n: number } | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [reelId, setReelId] = useState<string | null>(null);
+  const [shareFor, setShareFor] = useState<Post | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [originNames, setOriginNames] = useState<Record<string, string>>({});
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const cursorRef = useRef<string | null>(null);
+  const loadingRef = useRef(false);
+  const followedRef = useRef<Set<string>>(new Set());
 
   const [commenting, setCommenting] = useState<string | null>(null);
-  const [commentDraft, setCommentDraft] = useState("");
   const [commentsByPost, setCommentsByPost] = useState<Record<string, CommentItem[]>>({});
   const [commentsLoading, setCommentsLoading] = useState<string | null>(null);
   const [commentSubmitting, setCommentSubmitting] = useState(false);
@@ -815,78 +925,110 @@ export default function FeedPage() {
     return () => document.removeEventListener("mousedown", onDown);
   }, [menuOpenFor]);
 
-  // ── load posts ──
-  // The posts arrive first and everything else is fetched alongside, not one query after another,
-  // so the stream opens as soon as the posts and your own likes/follows/saves are in.
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        setFetching(true);
-        const { data: rawPosts } = await supabase
-          .from("posts")
-          .select(`*, profile:profiles!posts_user_id_fkey(${PROFILE_COLS})`)
-          .order("created_at", { ascending: false })
-          .limit(30);
-        if (cancelled) return;
-        if (!rawPosts?.length) { setPosts([]); setFetching(false); return; }
-        const postIds = rawPosts.map(p => p.id);
-        const authorIds = Array.from(new Set(rawPosts.map(p => p.user_id)));
+  // ── load posts, a page at a time ──
+  // The first page paints as soon as posts, likes and saves are back (all asked for at once).
+  // Comments and "who felt this" fill in afterwards without blocking anything.
+  const loadPage = async (reset: boolean, silent = false) => {
+    if (!user || loadingRef.current) return;
+    loadingRef.current = true;
+    if (reset && !silent) setFetching(true); else if (!reset) setLoadingMore(true);
+    try {
+      let q = supabase.from("posts").select(POST_SELECT).order("created_at", { ascending: false }).limit(PAGE_SIZE);
+      if (!reset && cursorRef.current) q = q.lt("created_at", cursorRef.current);
+      const followsQ = reset ? supabase.from("follows").select("following_id").eq("follower_id", user.id) : null;
+      const [postRes, followRes] = await Promise.all([q, followsQ ?? Promise.resolve(null)]);
+      if (followRes?.data) followedRef.current = new Set(followRes.data.map(f => f.following_id as string));
 
-        // all started at once; only the first three gate the first paint
-        const flagsP = Promise.all([
-          supabase.from("post_likes").select("post_id").eq("user_id", user.id).in("post_id", postIds),
-          supabase.from("follows").select("following_id").eq("follower_id", user.id).in("following_id", authorIds),
-          supabase.from("saved_posts").select("post_id").eq("user_id", user.id).in("post_id", postIds),
+      const rawPosts = (postRes.data ?? []) as unknown as Post[];
+      if (postRes.error || rawPosts.length === 0) {
+        if (reset) setPosts([]);
+        setHasMore(false);
+        return;
+      }
+      setHasMore(rawPosts.length === PAGE_SIZE);
+      cursorRef.current = rawPosts[rawPosts.length - 1].created_at;
+      const postIds = rawPosts.map(p => p.id);
+
+      const [likesRes, savesRes] = await Promise.all([
+        supabase.from("post_likes").select("post_id").eq("user_id", user.id).in("post_id", postIds),
+        supabase.from("saved_posts").select("post_id").eq("user_id", user.id).in("post_id", postIds),
+      ]);
+      const likedSet = new Set((likesRes.data ?? []).map(l => l.post_id as string));
+      const savedSet = new Set((savesRes.data ?? []).map(x => x.post_id as string));
+      const fresh = rawPosts.map(p => ({
+        ...p,
+        user_liked: likedSet.has(p.id),
+        user_following: followedRef.current.has(p.user_id),
+        user_saved: savedSet.has(p.id),
+      } as Post));
+      setPosts(ps => reset ? fresh : [...ps, ...fresh.filter(f => !ps.some(p => p.id === f.id))]);
+      setFetching(false);
+
+      // Names for "↻ from ..." on posts that were made from someone else's story.
+      const originIds = Array.from(new Set(rawPosts.map(p => p.origin_user).filter((x): x is string => !!x)));
+      if (originIds.length) {
+        void (async () => {
+          const { data } = await supabase.from("profiles").select("id,name").in("id", originIds);
+          if (data?.length) setOriginNames(o => ({ ...o, ...Object.fromEntries(data.map(r => [r.id as string, r.name as string])) }));
+        })().catch(() => {});
+      }
+
+      // Latest voices per post, for the conversation orbit, and who felt each post. Both fail quietly.
+      void (async () => {
+        const [commentsRes, likeRowsRes] = await Promise.all([
+          supabase.from("comments").select(COMMENT_SELECT).in("post_id", postIds).order("created_at", { ascending: false }).limit(60),
+          supabase.from("post_likes").select("post_id, user_id").in("post_id", postIds).limit(300),
         ]);
-        const commentsP = supabase
-          .from("comments")
-          .select(`id,post_id,user_id,content,created_at,profile:profiles!comments_user_id_fkey(${PROFILE_COLS})`)
-          .in("post_id", postIds)
-          .order("created_at", { ascending: false })
-          .limit(60);
-        const likersP = supabase.from("post_likes").select("post_id, user_id").in("post_id", postIds).limit(300);
-
-        const [likesR, followsR, savesR] = await flagsP;
-        if (cancelled) return;
-        const likedSet = new Set(likesR.data?.map(l => l.post_id) ?? []);
-        const followedSet = new Set(followsR.data?.map(f => f.following_id) ?? []);
-        const savedSet = new Set(savesR.data?.map(x => x.post_id) ?? []);
-        setPosts(rawPosts.map(p => ({
-          ...p,
-          user_liked: likedSet.has(p.id),
-          user_following: followedSet.has(p.user_id),
-          user_saved: savedSet.has(p.id),
-        } as Post)));
-        setFetching(false);
-
-        // Extras that only decorate the cards. They fail quietly and never hold anything up.
-        const [commentsR, likeRowsR] = await Promise.all([commentsP, likersP]);
-        if (cancelled) return;
-        if (commentsR.data?.length) {
+        if (commentsRes.data?.length) {
           const grouped: Record<string, CommentItem[]> = {};
-          (commentsR.data as unknown as CommentItem[]).forEach(c => { const a = (grouped[c.post_id] ??= []); if (a.length < 2) a.push(c); });
-          setOrbitByPost(grouped);
+          (commentsRes.data as unknown as CommentItem[]).forEach(c => { const arr = (grouped[c.post_id] ??= []); if (arr.length < 2) arr.push(c); });
+          setOrbitByPost(o => ({ ...o, ...grouped }));
         }
-        const likeRows = likeRowsR.data;
+        const likeRows = likeRowsRes.data;
         if (!likeRows?.length) return;
         const byPost: Record<string, string[]> = {};
-        likeRows.forEach(r => { const a = (byPost[r.post_id] ??= []); if (a.length < 4) a.push(r.user_id); });
+        likeRows.forEach(r => { const arr = (byPost[r.post_id] ??= []); if (arr.length < 4) arr.push(r.user_id); });
         const ids = Array.from(new Set(Object.values(byPost).flat()));
         const { data: profs } = await supabase.from("profiles").select("id, photos, avatar_url").in("id", ids);
-        if (cancelled) return;
         const photoById = new Map((profs ?? []).map(pr => [pr.id as string, (avatarUrl(pr.photos?.[0] ?? pr.avatar_url) ?? null) as string | null]));
         const out: Record<string, { id: string; photo: string | null }[]> = {};
         Object.entries(byPost).forEach(([pid, uids]) => { out[pid] = uids.map(u => ({ id: u, photo: photoById.get(u) ?? null })); });
-        setLikersByPost(out);
-      } catch (err) {
-        console.error("Feed load failed:", err);
-        if (!cancelled) setFetching(false);
-      }
-    })();
-    return () => { cancelled = true; };
+        setLikersByPost(l => ({ ...l, ...out }));
+      })().catch(() => {});
+    } finally {
+      loadingRef.current = false;
+      setLoadingMore(false);
+      setFetching(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!user) return;
+    cursorRef.current = null;
+    setHasMore(true);
+    void loadPage(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  // A story reposted to the feed from the tray: reload the top of the stream without the placeholder.
+  const loadPageRef = useRef(loadPage);
+  useEffect(() => { loadPageRef.current = loadPage; });
+  useEffect(() => {
+    const onRefresh = () => { cursorRef.current = null; setHasMore(true); void loadPageRef.current(true, true); };
+    window.addEventListener("feed:refresh", onRefresh);
+    return () => window.removeEventListener("feed:refresh", onRefresh);
+  }, []);
+
+  // Near the end of the stream, quietly bring in the next page.
+  useEffect(() => {
+    const el = sentinelRef.current;
+    const root = scrollerRef.current;
+    if (!el || !root || !hasMore || fetching || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) void loadPage(false); }, { root, rootMargin: "200% 0px 200% 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasMore, fetching, posts.length, tab, place, cultureTag, personFilter]);
 
   // Shared links (/feed?post=ID) jump straight to that post.
   useEffect(() => {
@@ -896,10 +1038,6 @@ export default function FeedPage() {
     if (id) requestAnimationFrame(() => document.getElementById(`soul-${id}`)?.scrollIntoView());
   }, [fetching, posts.length]);
 
-  // ids of the posts on screen, so the live feed can ignore everything else in the app
-  const idsRef = useRef<Set<string>>(new Set());
-  useEffect(() => { idsRef.current = new Set(posts.map(p => p.id)); }, [posts]);
-
   // Soul Pulse: other people's activity travels through the stream live.
   // Requires Realtime to be enabled for post_likes and comments in Supabase; harmless if it isn't.
   useEffect(() => {
@@ -908,21 +1046,21 @@ export default function FeedPage() {
       .channel("soul-pulse")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "post_likes" }, payload => {
         const row = payload.new as { post_id: string; user_id: string };
-        if (row.user_id === user.id || !idsRef.current.has(row.post_id)) return;
+        if (row.user_id === user.id) return;
         setPosts(ps => ps.map(p => p.id === row.post_id ? { ...p, likes_count: p.likes_count + 1 } : p));
         setIncoming({ postId: row.post_id, n: Date.now() });
         setPulseKey(k => k + 1);
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "comments" }, payload => {
         const row = payload.new as { post_id: string; user_id: string };
-        if (row.user_id === user.id || !idsRef.current.has(row.post_id)) return;
+        if (row.user_id === user.id) return;
         setPosts(ps => ps.map(p => p.id === row.post_id ? { ...p, comments_count: p.comments_count + 1 } : p));
         setPulseKey(k => k + 1);
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "posts" }, async payload => {
         const row = payload.new as { id: string; user_id: string };
         if (row.user_id === user.id) return;
-        const { data } = await supabase.from("posts").select(`*, profile:profiles!posts_user_id_fkey(${PROFILE_COLS})`).eq("id", row.id).single();
+        const { data } = await supabase.from("posts").select(POST_SELECT).eq("id", row.id).single();
         if (!data) return;
         setPending(ps => ps.some(x => x.id === data.id) ? ps : [{ ...(data as Post), user_liked: false, user_following: false, user_saved: false }, ...ps]);
         setPulseKey(k => k + 1);
@@ -940,43 +1078,48 @@ export default function FeedPage() {
     return () => { supabase.removeChannel(ch); };
   }, [user]);
 
-  // Soul River. Two jobs, both done once per frame while scrolling:
-  //  1. work out which post is on screen. Only that post and its neighbours are really mounted;
-  //     the rest are empty placeholders of the same height. That keeps a long stream light on a phone.
-  //  2. tilt and fade the nearest cards. Positions come from arithmetic, not from reading the layout.
-  const [active, setActive] = useState(0);
-  const activeRef = useRef(0);
+  // Soul River: cards tilt and fade with distance from the middle of the screen.
+  // Positions are measured once (every card has the same fixed height), so scrolling only does arithmetic,
+  // and only the few cards near the middle are touched.
   useEffect(() => {
     const el = scrollerRef.current;
-    if (!el) return;
-    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     let raf = 0;
+    let secs: HTMLElement[] = [];
+    let tops: number[] = [];
+    let h = 0;
+    let last: number[] = [];
+    const measure = () => {
+      secs = (Array.from(el.children) as HTMLElement[]).filter(n => n.dataset.soul);
+      tops = secs.map(n => n.offsetTop);
+      h = secs[0]?.offsetHeight ?? 0;
+      last = secs.map(() => 99);
+    };
     const apply = () => {
       raf = 0;
-      const first = el.firstElementChild as HTMLElement | null;
-      const h = first?.offsetHeight || 0;
       if (!h) return;
-      const idx = Math.max(0, Math.round(el.scrollTop / h));
-      if (idx !== activeRef.current) { activeRef.current = idx; setActive(idx); }
-      if (calm) return;
       const mid = el.scrollTop + el.clientHeight / 2;
-      const kids = el.children;
-      for (let i = Math.max(0, idx - 1); i <= Math.min(kids.length - 1, idx + 1); i++) {
-        const sec = kids[i] as HTMLElement;
-        const card = sec.firstElementChild as HTMLElement | null;
-        if (!card || !sec.dataset.soul) continue;
-        const d = Math.max(-1.2, Math.min(1.2, (i * h + h / 2 - mid) / h));
-        const a = Math.abs(d);
-        card.style.transform = `perspective(900px) rotateX(${d * -7}deg) scale(${1 - a * 0.07})`;
+      for (let i = 0; i < secs.length; i++) {
+        const d = Math.max(-1.2, Math.min(1.2, (tops[i] + h / 2 - mid) / h));
+        if (Math.abs(d) > 1.25 && last[i] === 1.2 * Math.sign(d)) continue; // already at its resting look
+        const q = Math.round(d * 200) / 200;
+        if (q === last[i]) continue;
+        last[i] = q;
+        const card = secs[i].firstElementChild as HTMLElement | null;
+        if (!card) continue;
+        const a = Math.abs(q);
+        card.style.transform = `perspective(900px) rotateX(${q * -7}deg) scale(${1 - a * 0.07})`;
         card.style.opacity = String(1 - a * 0.4);
       }
     };
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply); };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll);
+    const onResize = () => { measure(); onScroll(); };
+    measure();
     apply();
-    return () => { el.removeEventListener("scroll", onScroll); window.removeEventListener("resize", onScroll); if (raf) cancelAnimationFrame(raf); };
-  }, [fetching, tab, place, cultureTag, personFilter, posts.length, active]);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onResize);
+    return () => { el.removeEventListener("scroll", onScroll); window.removeEventListener("resize", onResize); if (raf) cancelAnimationFrame(raf); };
+  }, [fetching, tab, place, cultureTag, personFilter, posts.length]);
 
   // ── actions ──
   const toggleLike = async (post: Post) => {
@@ -1023,36 +1166,39 @@ export default function FeedPage() {
 
   const openComments = async (postId: string) => {
     setCommenting(postId);
-    setCommentDraft("");
     if (!commentsByPost[postId]) setCommentsLoading(postId);
     const { data } = await supabase
       .from("comments")
-      .select(`*, profile:profiles!comments_user_id_fkey(${PROFILE_COLS})`)
+      .select(COMMENT_SELECT)
       .eq("post_id", postId)
       .order("created_at", { ascending: true });
     setCommentsByPost(c => ({ ...c, [postId]: (data as CommentItem[]) ?? [] }));
     setCommentsLoading(null);
   };
 
-  const submitComment = async (post: Post) => {
-    if (!user || !commentDraft.trim() || commentSubmitting) return;
+  const submitComment = async (post: Post, text: string): Promise<boolean> => {
+    if (!user || !text.trim() || commentSubmitting) return false;
     setCommentSubmitting(true);
     const { data, error } = await supabase
       .from("comments")
-      .insert({ post_id: post.id, user_id: user.id, content: commentDraft.trim() })
-      .select(`*, profile:profiles!comments_user_id_fkey(${PROFILE_COLS})`)
+      .insert({ post_id: post.id, user_id: user.id, content: text.trim() })
+      .select(COMMENT_SELECT)
       .single();
     setCommentSubmitting(false);
-    if (error) { showToast("Couldn't post comment", "#FF3366"); return; }
+    if (error) { showToast("Couldn't post comment", "#FF3366"); return false; }
 
     setCommentsByPost(c => ({ ...c, [post.id]: [...(c[post.id] ?? []), data as CommentItem] }));
     setOrbitByPost(o => ({ ...o, [post.id]: [data as CommentItem, ...(o[post.id] ?? [])].slice(0, 2) }));
     setPosts(ps => ps.map(p => p.id === post.id ? { ...p, comments_count: p.comments_count + 1 } : p));
-    setCommentDraft("");
     firePulse();
+    return true;
   };
 
-  const sharePost = async (post: Post) => {
+  // Share opens a sheet: add to your own story, or send a link.
+  const sharePost = (post: Post) => setShareFor(post);
+
+  const shareLink = async (post: Post) => {
+    setShareFor(null);
     const url = `${window.location.origin}/feed?post=${post.id}`;
     const text = post.caption || "Check this out on ìjèbúsoul";
     if (typeof navigator !== "undefined" && navigator.share) {
@@ -1061,6 +1207,16 @@ export default function FeedPage() {
       await navigator.clipboard.writeText(url);
       showToast("Link copied", GOLD);
     }
+  };
+
+  const shareToStory = async (post: Post) => {
+    if (!user || shareBusy) return;
+    setShareBusy(true);
+    const r = await postToStory(post, user.id);
+    setShareBusy(false);
+    setShareFor(null);
+    if (r.ok) showToast("Added to your story", GOLD);
+    else showToast(r.reason === "sql" ? "Run supabase/reposts.sql first" : "Couldn't add to your story", "#FF3366");
   };
 
   const deletePost = async (post: Post) => {
@@ -1073,39 +1229,90 @@ export default function FeedPage() {
     showToast("Post deleted", "#888");
   };
 
-  // ── derived ──
-  const now = Date.now();
-  const recent = posts.filter(p => now - new Date(p.created_at).getTime() < DAY_MS);
-  const placeCounts = new Map<string, number>();
-  posts.forEach(p => { const l = p.profile?.location; if (l) placeCounts.set(l, (placeCounts.get(l) ?? 0) + 1); });
-  let base = posts;
-  if (tab === "now") base = recent;
-  else if (tab === "people") base = posts.filter(p => p.user_following);
-  else if (tab === "places" && place) base = posts.filter(p => p.profile?.location === place);
-  else if (tab === "culture") {
-    const tags = cultureTag ? [cultureTag] : ALL_CULTURE;
-    base = posts.filter(p => tags.some(t => hasTag(p.caption, t)));
-  }
-  const visible = personFilter ? base.filter(p => p.user_id === personFilter.id) : base;
+  // ── derived (memoised, so unrelated updates do not recompute them) ──
+  const placeCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    posts.forEach(p => { const l = p.profile?.location; if (l) m.set(l, (m.get(l) ?? 0) + 1); });
+    return m;
+  }, [posts]);
+  const visible = useMemo(() => {
+    let base = posts;
+    if (tab === "now") { const t = Date.now(); base = posts.filter(p => t - new Date(p.created_at).getTime() < DAY_MS); }
+    else if (tab === "people") base = posts.filter(p => p.user_following);
+    else if (tab === "places" && place) base = posts.filter(p => p.profile?.location === place);
+    else if (tab === "culture") {
+      const tags = cultureTag ? [cultureTag] : ALL_CULTURE;
+      base = posts.filter(p => tags.some(t => hasTag(p.caption, t)));
+    }
+    return personFilter ? base.filter(p => p.user_id === personFilter.id) : base;
+  }, [posts, tab, place, cultureTag, personFilter]);
+
+  // If a filter leaves almost nothing on screen, keep bringing in older posts until there is something to see.
+  useEffect(() => {
+    if (!fetching && !loadingMore && hasMore && visible.length < 3) void loadPage(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetching, loadingMore, hasMore, visible.length]);
 
   // Trending: the busiest recent posts get a heat field.
-  const hotIds = new Set(
-    posts
-      .map(p => {
-        const e = p.likes_count + p.comments_count * 2;
-        return { id: p.id, e, score: e / Math.pow((now - new Date(p.created_at).getTime()) / 3600000 + 2, 1.2) };
-      })
-      .filter(x => x.e >= 3)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3)
-      .map(x => x.id)
-  );
+  const hotIds = useMemo(() => {
+    const t = Date.now();
+    return new Set(
+      posts
+        .map(p => {
+          const e = p.likes_count + p.comments_count * 2;
+          return { id: p.id, e, score: e / Math.pow((t - new Date(p.created_at).getTime()) / 3600000 + 2, 1.2) };
+        })
+        .filter(x => x.e >= 3)
+        .sort((x, y) => y.score - x.score)
+        .slice(0, 3)
+        .map(x => x.id)
+    );
+  }, [posts]);
   const nodeLive = nodePost ? posts.find(p => p.id === nodePost.id) ?? nodePost : null;
   const commentingPost = commenting ? posts.find(p => p.id === commenting) ?? null : null;
 
+  // Stable handlers: always call the newest version, but never change identity, so memoised posts stay still.
+  const latest = useRef<(PostActions & { profile(id: string): void; closeReel(): void }) | null>(null);
+  useEffect(() => {
+    latest.current = {
+      open: p => setReelId(p.id),
+      profile: id => router.push(profileHref(id)),
+      closeReel: () => setReelId(null),
+      node: p => setNodePost(p),
+      toggleMenu: id => setMenuOpenFor(cur => (cur === id ? null : id)),
+      feel: toggleLike, follow: toggleFollow, save: toggleSave, talk: openComments, share: sharePost,
+      edit: p => { setMenuOpenFor(null); setEditingPost(p); },
+      del: deletePost,
+      toggleSound: () => setSoundOn(on => !on),
+    };
+  });
+  const actions = useMemo<PostActions>(() => ({
+    open: p => latest.current?.open(p),
+    node: p => latest.current?.node(p),
+    toggleMenu: id => latest.current?.toggleMenu(id),
+    feel: p => latest.current?.feel(p),
+    follow: p => latest.current?.follow(p),
+    save: p => latest.current?.save(p),
+    talk: id => latest.current?.talk(id),
+    share: p => latest.current?.share(p),
+    edit: p => latest.current?.edit(p),
+    del: p => latest.current?.del(p),
+    toggleSound: () => latest.current?.toggleSound(),
+  }), []);
+  const reelActions = useMemo<ReelActions>(() => ({
+    feel: p => latest.current?.feel(p),
+    follow: p => latest.current?.follow(p),
+    save: p => latest.current?.save(p),
+    talk: id => latest.current?.talk(id),
+    share: p => latest.current?.share(p),
+    profile: id => latest.current?.profile(id),
+    toggleSound: () => latest.current?.toggleSound(),
+    close: () => latest.current?.closeReel(),
+  }), []);
+
   const shell: React.CSSProperties = { height: "100dvh", maxWidth: 430, margin: "0 auto", background: "radial-gradient(80% 38% at 95% 8%, rgba(212,175,55,0.13), transparent 70%), radial-gradient(70% 40% at 0% 65%, rgba(112,92,205,0.15), transparent 70%), #07070c", fontFamily: "system-ui", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" };
 
-  if (authLoading || fetching) return (
+  if (authLoading) return (
     <div style={{ ...shell, background: colors.bg }}>
       <Header />
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1136,6 +1343,7 @@ export default function FeedPage() {
     <main style={shell}>
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes shimmer { to { background-position: -200% 0; } }
         @keyframes sheetRise { from { transform: translateY(100%); } to { transform: translateY(0); } }
         @keyframes feelFly {
           0%   { transform: translate(0,0) scale(0.6); opacity: 0; }
@@ -1148,12 +1356,16 @@ export default function FeedPage() {
           50% { transform: translate(var(--drift), calc(var(--drift) * -1)); opacity: 0.95; }
         }
         @keyframes soulBreathe { 0%, 100% { opacity: 0.6; transform: scale(1); } 50% { opacity: 1; transform: scale(1.25); } }
+        @keyframes heatField {
+          0%, 100% { box-shadow: 0 0 20px rgba(255,122,40,0.35), inset 0 0 40px rgba(255,122,40,0.12); }
+          50% { box-shadow: 0 0 48px rgba(255,122,40,0.75), inset 0 0 80px rgba(255,122,40,0.3); }
+        }
         @keyframes emberRise { 0% { transform: translateY(0); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateY(-260px) translateX(14px); opacity: 0; } }
         @keyframes orbitFloat { 0%, 100% { transform: translate(0,0); } 25% { transform: translate(7px,-9px); } 50% { transform: translate(0,-15px); } 75% { transform: translate(-7px,-7px); } }
         @keyframes riverArrive { from { opacity: 0; transform: translateY(-40px) scale(0.94); } to { opacity: 1; transform: none; } }
         @keyframes pillDrop { from { opacity: 0; transform: translateY(-14px); } to { opacity: 1; transform: none; } }
         @keyframes nodeBloom { from { opacity: 0; transform: scale(0.2); } to { opacity: 1; transform: scale(1); } }
-        @keyframes pulseTravel { from { transform: translateX(-80px); opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } to { transform: translateX(480px); opacity: 0; } }
+        @keyframes pulseTravel { from { left: -10%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } to { left: 105%; opacity: 0; } }
         .soul-scroll { scrollbar-width: none; }
         .soul-scroll::-webkit-scrollbar { display: none; }
         @media (prefers-reduced-motion: reduce) { .soul-anim { animation: none !important; } }
@@ -1176,16 +1388,37 @@ export default function FeedPage() {
         />
       )}
 
+      {reelId && user && visible.some(p => p.id === reelId) && (
+        <ReelViewer
+          posts={visible}
+          startId={reelId}
+          myId={user.id}
+          soundOn={soundOn}
+          originNames={originNames}
+          hasMore={hasMore}
+          onNeedMore={() => { if (!loadingRef.current) void loadPage(false); }}
+          onClosed={id => document.getElementById(`soul-${id}`)?.scrollIntoView({ block: "start" })}
+          actions={reelActions}
+        />
+      )}
+
+      {shareFor && user && (
+        <ShareSheet
+          post={posts.find(p => p.id === shareFor.id) ?? shareFor}
+          busy={shareBusy}
+          onStory={() => void shareToStory(shareFor)}
+          onLink={() => void shareLink(shareFor)}
+          onClose={() => setShareFor(null)}
+        />
+      )}
+
       {commentingPost && user && (
         <ConversationLayer
-          post={commentingPost}
-          comments={commentsByPost[commentingPost.id] ?? []}
+          comments={commentsByPost[commentingPost.id] ?? EMPTY_COMMENTS}
           loading={commentsLoading === commentingPost.id}
-          draft={commentDraft}
-          setDraft={setCommentDraft}
           submitting={commentSubmitting}
           myId={user.id}
-          onSubmit={() => submitComment(commentingPost)}
+          onSubmit={text => submitComment(commentingPost, text)}
           onClose={() => setCommenting(null)}
         />
       )}
@@ -1286,7 +1519,12 @@ export default function FeedPage() {
           </div>
         )}
         <div ref={scrollerRef} className="soul-scroll" style={{ position: "absolute", inset: 0, overflowY: "auto", scrollSnapType: "y mandatory", overscrollBehaviorY: "contain" }}>
-          {visible.length === 0 ? (
+          {fetching && posts.length === 0 ? (
+            <>
+              <SkeletonCard />
+              <SkeletonCard />
+            </>
+          ) : visible.length === 0 && !hasMore ? (
             <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "0 32px 80px", color: "rgba(255,255,255,0.65)", fontSize: 14 }}>
               <Inbox size={44} style={{ marginBottom: 16 }} />
               <div style={{ fontSize: 17, fontWeight: 800, color: "#fff", marginBottom: 4 }}>
@@ -1299,39 +1537,28 @@ export default function FeedPage() {
             </div>
           ) : (
             <>
-              {visible.map((post, i) => Math.abs(i - active) > 2 ? (
-                <section
-                  key={post.id}
-                  id={`soul-${post.id}`}
-                  data-soul="1"
-                  style={{ height: `calc(100% - ${BOTTOM_NAV_HEIGHT + 48}px)`, boxSizing: "border-box", scrollSnapAlign: "start", scrollSnapStop: "always" }}
-                />
-              ) : (
+              {visible.map((post, i) => (
                 <SoulPost
                   key={post.id}
                   post={post}
-                  active={i === active}
                   isOwner={post.user_id === user?.id}
                   menuOpen={menuOpenFor === post.id}
                   menuRef={menuRef}
-                  likers={likersByPost[post.id] ?? NONE}
+                  likers={likersByPost[post.id] ?? EMPTY_LIKERS}
                   hot={hotIds.has(post.id)}
                   arriving={arrivedIds.has(post.id)}
-                  orbit={orbitByPost[post.id] ?? NONE}
+                  orbit={orbitByPost[post.id] ?? EMPTY_ORBIT}
                   soundOn={soundOn}
-                  onToggleSound={() => setSoundOn(s => !s)}
-                  onNode={() => setNodePost(post)}
                   incoming={incoming?.postId === post.id ? incoming.n : 0}
-                  onToggleMenu={() => setMenuOpenFor(menuOpenFor === post.id ? null : post.id)}
-                  onFeel={() => toggleLike(post)}
-                  onFollow={() => toggleFollow(post)}
-                  onSave={() => toggleSave(post)}
-                  onTalk={() => openComments(post.id)}
-                  onShare={() => sharePost(post)}
-                  onEdit={() => { setMenuOpenFor(null); setEditingPost(post); }}
-                  onDelete={() => deletePost(post)}
+                  originName={post.origin_user ? originNames[post.origin_user] : undefined}
+                  frozen={reelId !== null}
+                  priority={i < 2}
+                  scrollerRef={scrollerRef}
+                  actions={actions}
                 />
               ))}
+              {hasMore && <SkeletonCard />}
+              <div ref={sentinelRef} style={{ height: 1 }} />
               <div style={{ height: BOTTOM_NAV_HEIGHT + 48 }} />
             </>
           )}

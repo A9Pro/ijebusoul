@@ -1,6 +1,5 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { createPortal } from "react-dom";
 import { Plus } from "lucide-react";
 import { avatarUrl } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
@@ -28,10 +27,13 @@ export default function StoriesTray() {
     setLoaded(true);
   }, [uid]);
 
-  // Wait a beat so the feed's own posts get the network and the main thread first.
+  useEffect(() => { void reload(); }, [reload]);
+
+  // Sharing to your story from anywhere in the app (the feed, a reel) refreshes the tray.
   useEffect(() => {
-    const t = setTimeout(() => { void reload(); }, 900);
-    return () => clearTimeout(t);
+    const onChanged = () => { void reload(); };
+    window.addEventListener("stories:changed", onChanged);
+    return () => window.removeEventListener("stories:changed", onChanged);
   }, [reload]);
 
   if (!uid) return null;
@@ -95,19 +97,14 @@ export default function StoriesTray() {
         )}
       </div>
 
-      {/* Rendered on document.body so the bottom nav and feed header can never sit on top of them */}
-      {open && typeof document !== "undefined" && createPortal(
+      {open && (
         <StoryViewer
           groups={feed.groups} startGroup={open.g} startStory={open.s} myId={uid}
           names={feed.names} matchByUser={feed.matchByUser}
           onClose={() => { setOpen(null); void reload(); }}
-        />,
-        document.body
+        />
       )}
-      {composing && typeof document !== "undefined" && createPortal(
-        <StoryComposer userId={uid} onClose={() => setComposing(false)} onCreated={() => void reload()} />,
-        document.body
-      )}
+      {composing && <StoryComposer userId={uid} onClose={() => setComposing(false)} onCreated={() => void reload()} />}
     </>
   );
 }

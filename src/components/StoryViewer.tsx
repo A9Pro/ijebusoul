@@ -1,10 +1,10 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { X, Heart, Send, Eye, Trash2, Repeat2, Volume2, VolumeX } from "lucide-react";
+import { X, Heart, Send, Eye, Trash2, Repeat2, Volume2, VolumeX, LayoutGrid } from "lucide-react";
 import { supabase, avatarUrl } from "@/lib/supabase";
 import { buildStrips } from "@/components/SoulCloth";
 import {
-  agoShort, deleteStory, hoursLeft, isLive, loadViewers, markViewed, reshareStory, setLiked, storyMediaUrl,
+  agoShort, deleteStory, hoursLeft, isLive, loadViewers, markViewed, repostStoryToFeed, reshareStory, setLiked, storyMediaUrl,
   type Story, type StoryGroup, type Viewer,
 } from "@/lib/stories";
 
@@ -166,6 +166,14 @@ export default function StoryViewer({
     flash(ok ? "Added to your story" : "Couldn't reshare");
   };
 
+  const toFeed = async () => {
+    if (!story) return;
+    setShareOpen(false);
+    flash("Posting to your feed…");
+    const r = await repostStoryToFeed(story, myId);
+    flash(r.ok ? "Posted to your feed" : r.reason === "sql" ? "Run supabase/reposts.sql first" : "Couldn't post it");
+  };
+
   const copyLink = async () => {
     setShareOpen(false);
     const url = `${window.location.origin}/profile/${story?.user_id}`;
@@ -175,13 +183,14 @@ export default function StoryViewer({
     } catch { /* cancelled */ }
   };
 
-  const frame = useMemo(() => (story?.reshared_from ? buildStrips(story.user_id, 1)[0] : null), [story?.reshared_from, story?.user_id]);
+  const shared = !!(story?.reshared_from || story?.source_post);
+  const frame = useMemo(() => (shared ? buildStrips(story!.user_id, 1)[0] : null), [shared, story?.user_id]); // eslint-disable-line react-hooks/exhaustive-deps
   const sig = SIGS[hash(story?.user_id ?? "x") % SIGS.length];
   if (!group || !story) return null;
 
   const photo = avatarUrl(group.user.photos?.[0] ?? group.user.avatar_url);
   const media = storyMediaUrl(story.media_url);
-  const origin = story.reshared_from ? names[story.origin_user ?? ""] : null;
+  const origin = shared && story.origin_user ? names[story.origin_user] : null;
 
   const onDown = (e: React.PointerEvent) => { down.current = { t: Date.now(), x: e.clientX, y: e.clientY }; setHeld(true); };
   const onUp = (e: React.PointerEvent) => {
@@ -243,7 +252,7 @@ export default function StoryViewer({
                 <div style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 19, lineHeight: 1.05, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{mine ? "Your story" : group.user.name}</div>
                 <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.72)", marginTop: 2 }}>
                   {agoShort(story.created_at)} · {hoursLeft(story.expires_at)}
-                  {origin && <span style={{ color: `rgb(${sig})`, fontWeight: 700 }}> · ↻ from {origin}</span>}
+                  {origin ? <span style={{ color: `rgb(${sig})`, fontWeight: 700 }}> · ↻ from {origin}</span> : story.source_post ? <span style={{ color: `rgb(${sig})`, fontWeight: 700 }}> · from the feed</span> : null}
                 </div>
               </div>
               {story.type === "video" && (
@@ -272,6 +281,7 @@ export default function StoryViewer({
                 </button>
                 <span style={{ flex: 1 }} />
                 <span style={{ fontSize: 12, color: "rgba(255,255,255,.7)" }}>♥ {story.likes}</span>
+                <button className="sv-btn" aria-label="Share" onClick={() => setShareOpen(true)} style={{ width: 46, height: 46, borderRadius: "50%", background: "rgba(16,14,20,.7)", border: "1px solid rgba(255,255,255,.2)" }}><Repeat2 size={18} /></button>
                 <button className="sv-btn" aria-label="Delete story" onClick={remove} style={{ width: 46, height: 46, borderRadius: "50%", background: "rgba(16,14,20,.7)", border: "1px solid rgba(255,255,255,.2)" }}><Trash2 size={18} color="#ff6b88" /></button>
               </>
             ) : (
@@ -326,8 +336,13 @@ export default function StoryViewer({
             <div onClick={() => setShareOpen(false)} style={{ position: "absolute", inset: 0, zIndex: 9, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "flex-end" }}>
               <div onClick={e => e.stopPropagation()} className="sv-sheet" style={{ width: "100%", borderRadius: "26px 26px 0 0", background: "linear-gradient(180deg,#14120d,#0b0a0e)", borderTop: "1px solid rgba(212,175,55,.45)", padding: "22px 20px 30px", display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ fontFamily: SERIF, fontStyle: "italic", fontWeight: 600, fontSize: 26, color: "#fff", marginBottom: 6 }}>Share this story</div>
-                <button className="sv-btn" onClick={reshare} style={{ justifyContent: "flex-start", gap: 12, height: 54, padding: "0 20px", borderRadius: 18, background: "rgba(255,255,255,.06)", border: "1px solid rgba(212,175,55,.35)", fontFamily: SERIF, fontStyle: "italic", fontSize: 19 }}><Repeat2 size={20} color={GOLD} /> Add to my story, stitched in your cloth</button>
-                <button className="sv-btn" onClick={copyLink} style={{ justifyContent: "flex-start", gap: 12, height: 54, padding: "0 20px", borderRadius: 18, background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.15)", fontFamily: SERIF, fontStyle: "italic", fontSize: 19 }}><Send size={20} color={GOLD} /> Send their profile link</button>
+                {!mine && (
+                  <button className="sv-btn" onClick={reshare} style={{ justifyContent: "flex-start", gap: 12, height: 54, padding: "0 20px", borderRadius: 18, background: "rgba(255,255,255,.06)", border: "1px solid rgba(212,175,55,.35)", fontFamily: SERIF, fontStyle: "italic", fontSize: 19 }}><Repeat2 size={20} color={GOLD} /> Add to my story, stitched in your cloth</button>
+                )}
+                <button className="sv-btn" onClick={toFeed} style={{ justifyContent: "flex-start", gap: 12, height: 54, padding: "0 20px", borderRadius: 18, background: "rgba(255,255,255,.06)", border: "1px solid rgba(212,175,55,.35)", fontFamily: SERIF, fontStyle: "italic", fontSize: 19 }}><LayoutGrid size={20} color={GOLD} /> Post to my feed</button>
+                {!mine && (
+                  <button className="sv-btn" onClick={copyLink} style={{ justifyContent: "flex-start", gap: 12, height: 54, padding: "0 20px", borderRadius: 18, background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.15)", fontFamily: SERIF, fontStyle: "italic", fontSize: 19 }}><Send size={20} color={GOLD} /> Send their profile link</button>
+                )}
               </div>
             </div>
           )}
