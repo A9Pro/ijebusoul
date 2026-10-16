@@ -3,7 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, avatarUrl } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
-import { useTheme, type Theme } from "@/context/ThemeContext";
+import { Bell, User } from "lucide-react";
+import { useTheme } from "@/context/ThemeContext";
+import { buildStrips } from "@/components/SoulCloth";
+import StoriesTray from "@/components/StoriesTray";
 import ProfilePreviewModal from "@/components/ProfilePreviewModal";
 import type { Profile } from "@/lib/types";
 
@@ -49,26 +52,26 @@ const timeAgo = (iso: string) => {
   return `${Math.floor(mins / 1440)}d ago`;
 };
 
-export default function Header() {
+// Woven aso-oke, the same cloth every time, used as the header's background.
+const CLOTH_STRIPS = buildStrips("ijebusoul", 9);
+
+export default function Header({ stories = false }: { stories?: boolean } = {}) {
   const router = useRouter();
   const { user } = useAuth();
-  const { theme, setTheme, colors } = useTheme();
+  const { colors } = useTheme();
 
   const [notifOpen, setNotifOpen]   = useState(false);
-  const [themeOpen, setThemeOpen]   = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [notifLoading, setNotifLoading]   = useState(false);
   const [previewProfile, setPreviewProfile] = useState<Profile | null>(null);
 
   const notifRef = useRef<HTMLDivElement>(null);
-  const themeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const t = e.target as Node;
       if (notifRef.current && !notifRef.current.contains(t)) setNotifOpen(false);
-      if (themeRef.current && !themeRef.current.contains(t)) setThemeOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -98,7 +101,6 @@ export default function Header() {
   const openNotifications = async () => {
     const opening = !notifOpen;
     setNotifOpen(opening);
-    setThemeOpen(false);
     if (!opening || !user) return;
 
     setNotifLoading(true);
@@ -126,46 +128,52 @@ export default function Header() {
     else if (n.type === "invite_prompt" || n.type === "referral_joined" || n.type === "referral_reward") router.push("/invite");
   };
 
-  const THEME_OPTIONS: { id: Theme; label: string; icon: string; desc: string }[] = [
-    { id: "light", label: "Light",     icon: "☀️", desc: "Clean & bright" },
-    { id: "dark",  label: "Dark",      icon: "🌙", desc: "Easy on the eyes" },
-    { id: "blue",  label: "Dark Blue", icon: "🌌", desc: "Midnight vibe" },
-  ];
+  const glass: React.CSSProperties = {
+    width: 38, height: 38, borderRadius: "50%", position: "relative",
+    background: "rgba(10,10,16,0.55)", border: "1px solid rgba(255,255,255,0.2)",
+    backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
+    display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff",
+  };
 
   return (
     <header style={{
       position: "sticky", top: 0, zIndex: 40,
       width: "100%", maxWidth: 430, margin: "0 auto",
-      background: colors.bg, borderBottom: `1px solid ${colors.border}`,
-      fontFamily: "system-ui",
+      borderBottom: "1px solid rgba(212,175,55,0.35)",
+      fontFamily: "system-ui", color: "#fff",
     }}>
+      {/* the cloth: nine woven strips under a soft dark veil, so text and rings stay readable */}
+      <div aria-hidden="true" style={{ position: "absolute", inset: 0, overflow: "hidden", display: "flex", pointerEvents: "none" }}>
+        {CLOTH_STRIPS.map((bg, i) => <div key={i} style={{ flex: 1, background: bg }} />)}
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(8,8,14,0.66), rgba(8,8,14,0.86))" }} />
+        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 2, background: "linear-gradient(90deg, transparent, #D4AF37, transparent)", opacity: 0.75 }} />
+      </div>
+
       {previewProfile && <ProfilePreviewModal profile={previewProfile} onClose={() => setPreviewProfile(null)} />}
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px" }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, minHeight: 68, padding: stories ? "11px 14px 11px 16px" : "16px 20px" }}>
 
-        <div onClick={() => router.push("/home")} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-          <IjebuSoulLogo accent={colors.accent} stroke={colors.text} />
-          <span style={{ fontSize: 19, fontWeight: 900, letterSpacing: "-0.02em", color: colors.text }}>
-            ìjèbú<span style={{ color: colors.accent }}>soul</span>
-          </span>
+        <div onClick={() => router.push("/home")} role="link" aria-label="ìjèbú soul home" style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", flexShrink: 0 }}>
+          <IjebuSoulLogo accent="#D4AF37" stroke="#fff" />
+          {!stories && (
+            <span style={{ fontSize: 19, fontWeight: 900, letterSpacing: "-0.02em", color: "#fff", textShadow: "0 1px 8px rgba(0,0,0,0.5)" }}>
+              ìjèbú<span style={{ color: "#D4AF37" }}>soul</span>
+            </span>
+          )}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>{stories ? <StoriesTray /> : null}</div>
 
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           <div ref={notifRef} style={{ position: "relative" }}>
-            <button onClick={openNotifications} aria-label="Notifications" style={{
-              width: 36, height: 36, borderRadius: "50%",
-              background: colors.card, border: `1px solid ${colors.border}`,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 15, cursor: "pointer", position: "relative",
-            }}>
-              🔔
+            <button onClick={openNotifications} aria-label="Notifications" style={glass}>
+              <Bell size={18} />
               {unreadCount > 0 && (
                 <span style={{
-                  position: "absolute", top: -2, right: -2, minWidth: 16, height: 16,
+                  position: "absolute", top: -3, right: -3, minWidth: 16, height: 16,
                   borderRadius: 50, background: "#FF3366", display: "flex",
                   alignItems: "center", justifyContent: "center", fontSize: 9,
-                  fontWeight: 800, color: "#fff", padding: "0 3px",
+                  fontWeight: 800, color: "#fff", padding: "0 3px", border: "1.5px solid #0a0a10",
                 }}>
                   {unreadCount > 9 ? "9+" : unreadCount}
                 </span>
@@ -174,7 +182,7 @@ export default function Header() {
 
             {notifOpen && (
               <div style={{
-                position: "absolute", right: 0, top: 44, width: 300, maxHeight: 400,
+                position: "absolute", right: 0, top: 46, width: 300, maxHeight: 400,
                 borderRadius: 16, overflow: "hidden", background: colors.card,
                 border: `1px solid ${colors.border}`, boxShadow: "0 12px 30px rgba(0,0,0,0.4)",
                 display: "flex", flexDirection: "column",
@@ -224,46 +232,9 @@ export default function Header() {
             )}
           </div>
 
-          <div ref={themeRef} style={{ position: "relative" }}>
-            <button onClick={() => { setThemeOpen(!themeOpen); setNotifOpen(false); }} aria-label="Change theme" style={{
-              height: 36, display: "flex", alignItems: "center", gap: 5,
-              padding: "0 12px", borderRadius: 50, background: colors.card,
-              border: `1px solid ${colors.border}`, color: colors.text,
-              fontSize: 14, cursor: "pointer",
-            }}>
-              {THEME_OPTIONS.find(o => o.id === theme)?.icon}
-              <span style={{ fontSize: 10 }}>▾</span>
-            </button>
-
-            {themeOpen && (
-              <div style={{
-                position: "absolute", right: 0, top: 44, width: 210, borderRadius: 16,
-                background: colors.card, border: `1px solid ${colors.border}`,
-                boxShadow: "0 12px 30px rgba(0,0,0,0.4)", padding: 6,
-              }}>
-                {THEME_OPTIONS.map(opt => (
-                  <button key={opt.id} onClick={() => { setTheme(opt.id); setThemeOpen(false); }} style={{
-                    width: "100%", display: "flex", alignItems: "center", gap: 10,
-                    padding: "10px 10px", borderRadius: 12, background: "none", border: "none",
-                    cursor: "pointer", textAlign: "left",
-                  }}>
-                    <span style={{ fontSize: 17, width: 24, textAlign: "center" }}>{opt.icon}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: colors.text }}>{opt.label}</div>
-                      <div style={{ fontSize: 10, color: colors.subtext }}>{opt.desc}</div>
-                    </div>
-                    {theme === opt.id && <span style={{ color: colors.accent, fontSize: 14 }}>✓</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <button onClick={() => router.push("/profile")} aria-label="Profile" style={{
-            width: 36, height: 36, borderRadius: "50%", background: colors.card,
-            border: `1px solid ${colors.border}`, display: "flex", alignItems: "center",
-            justifyContent: "center", fontSize: 15, cursor: "pointer",
-          }}>👤</button>
+          <button onClick={() => router.push("/profile")} aria-label="Profile" style={glass}>
+            <User size={18} />
+          </button>
         </div>
       </div>
     </header>

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X, Type as TypeIcon, Image as ImageIcon } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { prepareImage } from "@/lib/images";
 import { MAX_STORY_IMAGE, MAX_STORY_VIDEO, STORY_BUCKET } from "@/lib/stories";
 
 const GOLD = "#D4AF37";
@@ -40,9 +41,10 @@ export default function StoryComposer({ userId, onClose, onCreated }: { userId: 
     try {
       let path: string | null = null;
       if (mode === "media" && file) {
-        const ext = file.name.split(".").pop() || (kind === "video" ? "mp4" : "jpg");
+        const toSend = await prepareImage(file); // big photos are shrunk first, so stories open instantly
+        const ext = toSend.name.split(".").pop() || (kind === "video" ? "mp4" : "jpg");
         path = `${userId}/${Date.now()}.${ext}`;
-        const { error: upErr } = await supabase.storage.from(STORY_BUCKET).upload(path, file, { contentType: file.type });
+        const { error: upErr } = await supabase.storage.from(STORY_BUCKET).upload(path, toSend, { contentType: toSend.type });
         if (upErr) throw upErr;
       }
       const { error: insErr } = await supabase.from("stories").insert({

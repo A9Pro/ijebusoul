@@ -6,10 +6,10 @@ import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import BottomNav, { BOTTOM_NAV_HEIGHT } from "@/components/BottomNav";
 import Header from "@/components/Header";
-import StoriesTray from "@/components/StoriesTray";
 import ReelViewer, { type ReelActions } from "@/components/ReelViewer";
 import ShareSheet from "@/components/ShareSheet";
 import { postToStory } from "@/lib/stories";
+import { prepareImage } from "@/lib/images";
 import type { Post } from "@/lib/types";
 import {
   Sparkles, MessageCircle, Share2, Bookmark, MoreHorizontal, X,
@@ -380,12 +380,12 @@ function SoulPostBase(p: SoulPostProps) {
 
           <div style={{ pointerEvents: "auto", flexShrink: 0 }}>
             {!p.isOwner ? (
-              <button onClick={onFollow} style={{ background: post.user_following ? "rgba(255,255,255,0.12)" : GOLD, backdropFilter: "blur(8px)", border: post.user_following ? "1px solid rgba(255,255,255,0.25)" : "none", borderRadius: 50, padding: "7px 16px", fontSize: 12, fontWeight: 700, color: post.user_following ? "#fff" : "#000", cursor: "pointer" }}>
+              <button onClick={onFollow} style={{ background: post.user_following ? "rgba(255,255,255,0.12)" : GOLD, backdropFilter: near ? "blur(8px)" : undefined, border: post.user_following ? "1px solid rgba(255,255,255,0.25)" : "none", borderRadius: 50, padding: "7px 16px", fontSize: 12, fontWeight: 700, color: post.user_following ? "#fff" : "#000", cursor: "pointer" }}>
                 {post.user_following ? "Following" : "Follow"}
               </button>
             ) : (
               <div style={{ position: "relative" }} ref={p.menuOpen ? p.menuRef : undefined}>
-                <button onClick={onToggleMenu} aria-label="Post options" style={{ width: 38, height: 38, borderRadius: "50%", background: "rgba(0,0,0,0.4)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                <button onClick={onToggleMenu} aria-label="Post options" style={{ width: 38, height: 38, borderRadius: "50%", background: "rgba(0,0,0,0.4)", backdropFilter: near ? "blur(8px)" : undefined, border: "1px solid rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
                   <MoreHorizontal size={18} color="#fff" />
                 </button>
                 {p.menuOpen && (
@@ -400,20 +400,20 @@ function SoulPostBase(p: SoulPostProps) {
         </div>
 
         <button onClick={() => a.open(post)} aria-label="Open in full screen"
-          style={{ position: "absolute", top: 72, right: 14, zIndex: 4, width: 36, height: 36, borderRadius: "50%", background: "rgba(0,0,0,0.45)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+          style={{ position: "absolute", top: 72, right: 14, zIndex: 4, width: 36, height: 36, borderRadius: "50%", background: "rgba(0,0,0,0.45)", backdropFilter: near ? "blur(8px)" : undefined, border: "1px solid rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
           <Maximize2 size={15} color="#fff" />
         </button>
 
         {isVideo && (
           <button onClick={a.toggleSound} aria-label={muted ? "Unmute" : "Mute"}
-            style={{ position: "absolute", top: 116, right: 14, zIndex: 4, width: 36, height: 36, borderRadius: "50%", background: "rgba(0,0,0,0.45)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+            style={{ position: "absolute", top: 116, right: 14, zIndex: 4, width: 36, height: 36, borderRadius: "50%", background: "rgba(0,0,0,0.45)", backdropFilter: near ? "blur(8px)" : undefined, border: "1px solid rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
             {muted ? <VolumeX size={16} color="#fff" /> : <Volume2 size={16} color="#fff" />}
           </button>
         )}
 
         {p.hot && (
           <>
-            <div style={{ position: "absolute", top: 68, left: 14, zIndex: 2, display: "flex", alignItems: "center", gap: 5, background: `rgba(${HEAT},0.18)`, border: `1px solid rgba(${HEAT},0.55)`, borderRadius: 50, padding: "4px 10px", fontSize: 12, fontWeight: 800, color: "#ffb27a", pointerEvents: "none", backdropFilter: "blur(6px)" }}>
+            <div style={{ position: "absolute", top: 68, left: 14, zIndex: 2, display: "flex", alignItems: "center", gap: 5, background: `rgba(${HEAT},0.18)`, border: `1px solid rgba(${HEAT},0.55)`, borderRadius: 50, padding: "4px 10px", fontSize: 12, fontWeight: 800, color: "#ffb27a", pointerEvents: "none", backdropFilter: near ? "blur(6px)" : undefined }}>
               <Flame size={13} /> Trending
             </div>
             {near && Array.from({ length: 9 }, (_, i) => (
@@ -427,7 +427,7 @@ function SoulPostBase(p: SoulPostProps) {
           const cp = avatarUrl(c.profile?.photos?.[0] ?? c.profile?.avatar_url);
           const tops = isText ? ["18%", "68%"] : ["34%", "47%"];
           return (
-            <button key={c.id} onClick={onTalk} className="soul-anim" style={{ position: "absolute", zIndex: 2, top: tops[i] ?? tops[1], ...(i === 0 ? { right: 12 } : { left: 12 }), maxWidth: "62%", display: "flex", alignItems: "center", gap: 7, background: "rgba(14,14,20,0.55)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 18, padding: "5px 11px 5px 5px", cursor: "pointer", textAlign: "left", animation: near ? `orbitFloat ${6 + i * 2}s ease-in-out infinite` : undefined }}>
+            <button key={c.id} onClick={onTalk} className="soul-anim" style={{ position: "absolute", zIndex: 2, top: tops[i] ?? tops[1], ...(i === 0 ? { right: 12 } : { left: 12 }), maxWidth: "62%", display: "flex", alignItems: "center", gap: 7, background: "rgba(14,14,20,0.55)", backdropFilter: near ? "blur(10px)" : undefined, WebkitBackdropFilter: near ? "blur(10px)" : undefined, border: "1px solid rgba(255,255,255,0.14)", borderRadius: 18, padding: "5px 11px 5px 5px", cursor: "pointer", textAlign: "left", animation: near ? `orbitFloat ${6 + i * 2}s ease-in-out infinite` : undefined }}>
               <span style={{ width: 22, height: 22, borderRadius: "50%", background: "#1c1c26", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>
                 {cp ? <img loading="lazy" decoding="async" src={cp} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "🙂"}
               </span>
@@ -462,7 +462,7 @@ function SoulPostBase(p: SoulPostProps) {
             </div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(14,14,20,0.55)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 50, padding: 6, pointerEvents: "auto" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(14,14,20,0.55)", backdropFilter: near ? "blur(14px)" : undefined, WebkitBackdropFilter: near ? "blur(14px)" : undefined, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 50, padding: 6, pointerEvents: "auto" }}>
             <button onClick={feel} style={{ flex: 1.3, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: post.user_liked ? `rgba(${sig},0.95)` : "rgba(255,255,255,0.08)", border: "none", borderRadius: 50, padding: "12px 0", fontSize: 14, fontWeight: 800, color: post.user_liked ? "#000" : "#fff", cursor: "pointer", transition: "background 0.2s", boxShadow: post.user_liked ? `0 0 18px rgba(${sig},0.6)` : "none" }}>
               <Sparkles size={17} fill={post.user_liked ? "#000" : "none"} /> {post.user_liked ? "Felt" : "Feel"}
             </button>
@@ -683,9 +683,10 @@ const SoulComposer = ({ userId, editingPost, onClose, onCreated, onUpdated, colo
 
   const upload = async () => {
     if (!file) return null;
-    const ext = file.name.split(".").pop();
+    const toSend = await prepareImage(file); // big photos are shrunk first, so they load fast for everyone
+    const ext = toSend.name.split(".").pop();
     const path = `${userId}/${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("posts").upload(path, file, { upsert: true });
+    const { error: uploadErr } = await supabase.storage.from("posts").upload(path, toSend, { upsert: true });
     if (uploadErr) throw uploadErr;
     return path;
   };
@@ -1109,7 +1110,6 @@ export default function FeedPage() {
         if (!card) continue;
         const a = Math.abs(q);
         card.style.transform = `perspective(900px) rotateX(${q * -7}deg) scale(${1 - a * 0.07})`;
-        card.style.opacity = String(1 - a * 0.4);
       }
     };
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply); };
@@ -1365,7 +1365,7 @@ export default function FeedPage() {
         @keyframes riverArrive { from { opacity: 0; transform: translateY(-40px) scale(0.94); } to { opacity: 1; transform: none; } }
         @keyframes pillDrop { from { opacity: 0; transform: translateY(-14px); } to { opacity: 1; transform: none; } }
         @keyframes nodeBloom { from { opacity: 0; transform: scale(0.2); } to { opacity: 1; transform: scale(1); } }
-        @keyframes pulseTravel { from { left: -10%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } to { left: 105%; opacity: 0; } }
+        @keyframes pulseTravel { from { transform: translateX(-70px); opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } to { transform: translateX(440px); opacity: 0; } }
         .soul-scroll { scrollbar-width: none; }
         .soul-scroll::-webkit-scrollbar { display: none; }
         @media (prefers-reduced-motion: reduce) { .soul-anim { animation: none !important; } }
@@ -1436,7 +1436,7 @@ export default function FeedPage() {
         />
       )}
 
-      <Header />
+      <Header stories />
 
       <div style={{ position: "relative", zIndex: 10, padding: "6px 16px 8px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -1463,8 +1463,6 @@ export default function FeedPage() {
             );
           })}
         </div>
-
-        <StoriesTray />
 
         {tab === "places" && (
           <div className="soul-scroll" style={{ display: "flex", gap: 8, overflowX: "auto", marginTop: 10, paddingBottom: 2 }}>
@@ -1503,9 +1501,9 @@ export default function FeedPage() {
 
         {/* Soul Pulse: a slow idle light, and a brighter one whenever something happens */}
         <div style={{ position: "relative", height: 1, marginTop: 10, background: "rgba(255,255,255,0.1)", overflow: "hidden" }}>
-          <span className="soul-anim" style={{ position: "absolute", top: -1, width: 46, height: 3, borderRadius: 3, background: `linear-gradient(90deg, transparent, ${GOLD}, transparent)`, animation: "pulseTravel 7s linear infinite" }} />
+          <span className="soul-anim" style={{ position: "absolute", left: 0, top: -1, width: 46, height: 3, borderRadius: 3, background: `linear-gradient(90deg, transparent, ${GOLD}, transparent)`, animation: "pulseTravel 7s linear infinite" }} />
           {pulseKey > 0 && (
-            <span key={pulseKey} className="soul-anim" style={{ position: "absolute", top: -2, width: 70, height: 5, borderRadius: 5, background: "linear-gradient(90deg, transparent, #fff, transparent)", boxShadow: `0 0 12px ${GOLD}`, animation: "pulseTravel 1.4s ease-out forwards" }} />
+            <span key={pulseKey} className="soul-anim" style={{ position: "absolute", left: 0, top: -2, width: 70, height: 5, borderRadius: 5, background: "linear-gradient(90deg, transparent, #fff, transparent)", boxShadow: `0 0 12px ${GOLD}`, animation: "pulseTravel 1.4s ease-out forwards" }} />
           )}
         </div>
       </div>
