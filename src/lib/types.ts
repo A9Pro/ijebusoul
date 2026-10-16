@@ -19,6 +19,13 @@ export type Profile = {
   birthday_shoutout?: boolean;
 };
 
+/**
+ * A profile as other people see it. Same fields as Profile; any extra field the public
+ * profile page reads is allowed too, so adding a field there never breaks the build.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type PublicProfile = Profile & { [extra: string]: any };
+
 export type Match = {
   id: string;
   user1_id: string;
