@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, avatarUrl } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
-import { Bell, User } from "lucide-react";
+import { Bell, Search, User } from "lucide-react";
+import { startNotifStore, stopNotifStore, clearUnread, useUnreadCount } from "@/lib/notifStore";
 import { useTheme } from "@/context/ThemeContext";
 import { buildStrips } from "@/components/SoulCloth";
 import StoriesTray from "@/components/StoriesTray";
@@ -62,7 +63,7 @@ export default function Header({ stories = true }: { stories?: boolean } = {}) {
   const { colors } = useTheme();
 
   const [notifOpen, setNotifOpen]   = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const unreadCount = useUnreadCount();
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [notifLoading, setNotifLoading]   = useState(false);
   const [previewProfile, setPreviewProfile] = useState<Profile | null>(null);
@@ -78,26 +79,15 @@ export default function Header({ stories = true }: { stories?: boolean } = {}) {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  // The unread count lives in a shared store, so changing page does not re-run it.
   useEffect(() => {
-    if (!user) return;
-    (async () => {
-      const { count } = await supabase
-        .from("notifications")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", user.id)
-        .eq("read", false);
-      setUnreadCount(count ?? 0);
-    })();
-
-    const channel = supabase
-      .channel(`header-notifications:${user.id}`)
-      .on("postgres_changes", {
-        event: "INSERT", schema: "public", table: "notifications",
-        filter: `user_id=eq.${user.id}`,
-      }, () => setUnreadCount(c => c + 1))
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    if (user) startNotifStore(user.id); else stopNotifStore();
   }, [user]);
+
+  // Warm up the pages this header links to.
+  useEffect(() => {
+    ["/search", "/notifications", "/profile"].forEach(p => router.prefetch(p));
+  }, [router]);
 
   const openNotifications = async () => {
     const opening = !notifOpen;
@@ -117,7 +107,7 @@ export default function Header({ stories = true }: { stories?: boolean } = {}) {
 
     if (unreadCount > 0) {
       await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false);
-      setUnreadCount(0);
+      clearUnread();
     }
   };
 
@@ -166,6 +156,10 @@ export default function Header({ stories = true }: { stories?: boolean } = {}) {
         <div style={{ flex: 1, minWidth: 0 }}>{stories ? <StoriesTray /> : null}</div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <button onClick={() => router.push("/search")} aria-label="Search" style={glass}>
+            <Search size={18} />
+          </button>
+
           <div ref={notifRef} style={{ position: "relative" }}>
             <button onClick={openNotifications} aria-label="Notifications" style={glass}>
               <Bell size={18} />
@@ -211,7 +205,7 @@ export default function Header({ stories = true }: { stories?: boolean } = {}) {
                           onClick={() => n.actor && setPreviewProfile(n.actor)}
                           style={{ width: 32, height: 32, borderRadius: "50%", background: colors.bg, overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: n.actor ? "pointer" : "default" }}
                         >
-                          {photo ? <img src={photo} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : <span>{iconFor(n.type)}</span>}
+                          {photo ? <img src={photo} loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : <span>{iconFor(n.type)}</span>}
                         </div>
                         <div onClick={() => goToTarget(n)} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
                           <div style={{ fontSize: 12.5, color: colors.text, lineHeight: 1.4 }}>{copyFor(n.type, name)}</div>
